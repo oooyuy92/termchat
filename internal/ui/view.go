@@ -4,6 +4,8 @@ package ui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/muesli/reflow/wrap"
 )
 
 // cleanGlamourOutput strips glamour's leading/trailing blank lines and
@@ -11,8 +13,17 @@ import (
 // The glamour paragraph renderer hardcodes "\n" before each non-first paragraph
 // and "\n" after each paragraph, producing "\n\n" (a blank line) between them.
 // Code block blank lines have ANSI codes between newlines and are unaffected.
+// The MarginWriter pads every line to terminal width with spaces; stripping
+// trailing spaces first converts those padded "blank" lines into empty strings
+// so the subsequent \n\n collapse catches them.
 func cleanGlamourOutput(s string) string {
 	s = strings.TrimLeft(s, "\n")
+	// Strip trailing spaces from each line to remove padding-writer artifacts.
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	s = strings.Join(lines, "\n")
 	s = strings.ReplaceAll(s, "\n\n", "\n")
 	s = strings.TrimRight(s, " \n")
 	return s
@@ -37,7 +48,13 @@ func (m Model) View() string {
 			if err != nil {
 				b.WriteString(msg.Content + "\n\n")
 			} else {
-				b.WriteString(cleanGlamourOutput(rendered) + "\n\n")
+				cleaned := cleanGlamourOutput(rendered)
+				// Hard-wrap long lines (e.g. Chinese text with no spaces) that
+				// glamour's word-wrapper cannot break at word boundaries.
+				if m.width > 0 {
+					cleaned = wrap.String(cleaned, m.width)
+				}
+				b.WriteString(cleaned + "\n\n")
 			}
 		}
 	}
@@ -54,7 +71,11 @@ func (m Model) View() string {
 			if err != nil {
 				b.WriteString(m.currentResp)
 			} else {
-				b.WriteString(cleanGlamourOutput(rendered) + "\n")
+				cleaned := cleanGlamourOutput(rendered)
+				if m.width > 0 {
+					cleaned = wrap.String(cleaned, m.width)
+				}
+				b.WriteString(cleaned + "\n")
 			}
 		}
 		b.WriteString("\u2588\n")
