@@ -110,6 +110,8 @@ func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
 	}
 	zero := uint(0)
 	s.Document.Margin = &zero
+	// Remove the extra blank line glamour adds after each paragraph block
+	s.Paragraph.BlockSuffix = ""
 	return glamour.NewTermRenderer(
 		glamour.WithStyles(s),
 		glamour.WithWordWrap(width),
