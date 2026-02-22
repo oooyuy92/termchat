@@ -111,7 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.currentResp = ""
 		m.currentThinking = ""
-		return m, nil
+		return m, m.autoSaveCmd()
 
 	case streamErrMsg:
 		m.streaming = false
@@ -130,6 +130,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMsg = "Config saved"
 		}
+		return m, nil
+
+	case autoSavedMsg:
 		return m, nil
 	}
 
@@ -173,6 +176,16 @@ func (m Model) readNextChunk() tea.Cmd {
 	}
 }
 
+func (m Model) autoSaveCmd() tea.Cmd {
+	msgs := m.history.Messages()
+	store := m.store
+	name := m.autoSaveName
+	return func() tea.Msg {
+		_ = store.Save(name, msgs)
+		return autoSavedMsg{}
+	}
+}
+
 func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 	parts := strings.Fields(input)
 	cmd := parts[0]
@@ -210,6 +223,7 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.statusMsg = "Save failed: " + err.Error()
 		} else {
+			m.autoSaveName = name
 			m.statusMsg = "Saved as " + name
 		}
 		return m, nil
@@ -223,6 +237,7 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.statusMsg = "Load failed: " + err.Error()
 		} else {
+			m.autoSaveName = name
 			m.history.Clear()
 			for _, msg := range msgs {
 				m.history.Add(msg)

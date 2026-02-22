@@ -53,6 +53,9 @@ type configSavedMsg struct {
 	Err error
 }
 
+// autoSavedMsg is the no-op result from a background auto-save.
+type autoSavedMsg struct{}
+
 type configField struct {
 	Label   string
 	Key     string
