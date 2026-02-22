@@ -3,6 +3,7 @@ package ui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/termchat/termchat/internal/storage"
@@ -23,9 +24,18 @@ func buildResumePicker(convs []storage.ConvInfo) resumePicker {
 			groups = append(groups, dateGroup{date: c.Date})
 			groupIdx[c.Date] = idx
 		}
-		groups[idx].convs = append(groups[idx].convs, c.Name)
+		groups[idx].convs = append(groups[idx].convs, c)
 	}
 	return resumePicker{groups: groups}
+}
+
+// truncate shortens s to at most n runes, appending "…" if truncated.
+func truncate(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:n]) + "…"
 }
 
 func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -60,20 +70,20 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.statusMsg = "No conversations"
 			return m, nil
 		}
-		name := p.groups[p.dateIdx].convs[p.convIdx]
-		msgs, err := m.store.Load(name)
+		conv := p.groups[p.dateIdx].convs[p.convIdx]
+		msgs, err := m.store.Load(conv.Name)
 		if err != nil {
 			m.statusMsg = "Load failed: " + err.Error()
 			m.mode = modeChat
 			return m, nil
 		}
-		m.autoSaveName = name
+		m.autoSaveName = conv.Name
 		m.history.Clear()
 		for _, msg := range msgs {
 			m.history.Add(msg)
 		}
 		m.mode = modeChat
-		m.statusMsg = "Resumed: " + name
+		m.statusMsg = "Resumed: " + conv.Name
 	case "esc":
 		m.mode = modeChat
 		m.statusMsg = "Cancelled"
@@ -117,12 +127,18 @@ func (m Model) viewResumePicker() string {
 
 	// Conversation list for current date group
 	group := p.groups[p.dateIdx]
-	for i, name := range group.convs {
+	for i, conv := range group.convs {
 		cursor := "  "
 		if i == p.convIdx {
 			cursor = m.theme.ConfigCursorStyle().Render("> ")
 		}
-		b.WriteString(cursor + m.theme.ConfigValueStyle().Render(name) + "\n")
+		name := m.theme.ConfigValueStyle().Render(conv.Name)
+		if conv.Summary != "" {
+			summary := m.theme.ConfigHelpStyle().Render("  " + truncate(conv.Summary, 50))
+			b.WriteString(cursor + name + summary + "\n")
+		} else {
+			b.WriteString(cursor + name + "\n")
+		}
 	}
 
 	b.WriteString("\n")

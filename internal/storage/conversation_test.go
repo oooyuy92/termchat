@@ -114,10 +114,10 @@ func TestListEmpty(t *testing.T) {
 func TestListWithDate(t *testing.T) {
 	store := newTestStore(t)
 
-	if err := store.Save("conv-a", []chat.Message{{Role: "user", Content: "a"}}); err != nil {
+	if err := store.Save("conv-a", []chat.Message{{Role: "user", Content: "hello from conv-a"}}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := store.Save("conv-b", []chat.Message{{Role: "user", Content: "b"}}); err != nil {
+	if err := store.Save("conv-b", []chat.Message{{Role: "assistant", Content: "bot first"}, {Role: "user", Content: "hello from conv-b"}}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
@@ -140,5 +140,12 @@ func TestListWithDate(t *testing.T) {
 	// conv-b was saved last — must appear first.
 	if convs[0].Name != "conv-b" {
 		t.Errorf("convs[0].Name = %q, want %q", convs[0].Name, "conv-b")
+	}
+	// Summary must be first user message content.
+	if convs[0].Summary != "hello from conv-b" {
+		t.Errorf("convs[0].Summary = %q, want %q", convs[0].Summary, "hello from conv-b")
+	}
+	if convs[1].Summary != "hello from conv-a" {
+		t.Errorf("convs[1].Summary = %q, want %q", convs[1].Summary, "hello from conv-a")
 	}
 }

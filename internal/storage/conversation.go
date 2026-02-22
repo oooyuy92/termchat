@@ -16,8 +16,9 @@ var ErrNotFound = errors.New("conversation not found")
 
 // ConvInfo holds summary information for a conversation.
 type ConvInfo struct {
-	Name string
-	Date string // "YYYY-MM-DD" (date portion of updated_at)
+	Name    string
+	Date    string // "YYYY-MM-DD" (date portion of updated_at)
+	Summary string // first user message content (empty if none)
 }
 
 type Store struct {
@@ -173,11 +174,15 @@ func (s *Store) List() ([]string, error) {
 	return names, rows.Err()
 }
 
-// ListWithDate returns all conversations with their date string (YYYY-MM-DD),
-// ordered by most recently updated.
+// ListWithDate returns all conversations with their date string (YYYY-MM-DD)
+// and first user message summary, ordered by most recently updated.
 func (s *Store) ListWithDate() ([]ConvInfo, error) {
 	rows, err := s.db.Query(
-		`SELECT name, date(updated_at) FROM conversations ORDER BY updated_at DESC, id DESC`,
+		`SELECT c.name, date(c.updated_at),
+			COALESCE((SELECT m.content FROM messages m
+				WHERE m.conversation_id = c.id AND m.role = 'user'
+				ORDER BY m.seq ASC LIMIT 1), '')
+		FROM conversations c ORDER BY c.updated_at DESC, c.id DESC`,
 	)
 	if err != nil {
 		return nil, err
@@ -187,7 +192,7 @@ func (s *Store) ListWithDate() ([]ConvInfo, error) {
 	var convs []ConvInfo
 	for rows.Next() {
 		var c ConvInfo
-		if err := rows.Scan(&c.Name, &c.Date); err != nil {
+		if err := rows.Scan(&c.Name, &c.Date, &c.Summary); err != nil {
 			return nil, err
 		}
 		convs = append(convs, c)

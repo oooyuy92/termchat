@@ -74,8 +74,8 @@ type configEditor struct {
 }
 
 type dateGroup struct {
-	date  string   // "YYYY-MM-DD"
-	convs []string // conversation names in this group (most recent first)
+	date  string         // "YYYY-MM-DD"
+	convs []storage.ConvInfo // conversations in this group (most recent first)
 }
 
 type resumePicker struct {
