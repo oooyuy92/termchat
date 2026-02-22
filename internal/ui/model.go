@@ -3,7 +3,9 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -92,6 +94,7 @@ type Model struct {
 	mode            uiMode
 	configEd        configEditor
 	cfgPath         string
+	autoSaveName    string
 	input           string
 	streaming       bool
 	confirmQuit     bool
@@ -140,14 +143,20 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 		storageDir = home + storageDir[1:]
 	}
 
+	store, err := storage.New(storageDir)
+	if err != nil {
+		return Model{}, fmt.Errorf("open storage: %w", err)
+	}
+
 	return Model{
-		cfg:      cfg,
-		client:   chat.NewClient(cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model),
-		history:  chat.NewHistory(),
-		store:    storage.New(storageDir),
-		renderer: renderer,
-		cfgPath:  cfgPath,
-		theme:    ThemeByName(cfg.Settings.Theme),
+		cfg:          cfg,
+		client:       chat.NewClient(cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model),
+		history:      chat.NewHistory(),
+		store:        store,
+		renderer:     renderer,
+		cfgPath:      cfgPath,
+		theme:        ThemeByName(cfg.Settings.Theme),
+		autoSaveName: time.Now().Format("2006-01-02_150405"),
 	}, nil
 }
 
