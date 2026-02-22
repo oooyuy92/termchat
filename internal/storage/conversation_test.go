@@ -110,3 +110,35 @@ func TestListEmpty(t *testing.T) {
 		t.Errorf("List() = %v, want empty", names)
 	}
 }
+
+func TestListWithDate(t *testing.T) {
+	store := newTestStore(t)
+
+	if err := store.Save("conv-a", []chat.Message{{Role: "user", Content: "a"}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Save("conv-b", []chat.Message{{Role: "user", Content: "b"}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	convs, err := store.ListWithDate()
+	if err != nil {
+		t.Fatalf("ListWithDate() error = %v", err)
+	}
+	if len(convs) != 2 {
+		t.Fatalf("ListWithDate() len = %d, want 2", len(convs))
+	}
+	// Date must be a non-empty string in YYYY-MM-DD format (10 chars).
+	for _, c := range convs {
+		if len(c.Date) != 10 {
+			t.Errorf("conv %q: Date = %q, want 10-char YYYY-MM-DD", c.Name, c.Date)
+		}
+		if c.Name == "" {
+			t.Error("expected non-empty Name")
+		}
+	}
+	// conv-b was saved last — must appear first.
+	if convs[0].Name != "conv-b" {
+		t.Errorf("convs[0].Name = %q, want %q", convs[0].Name, "conv-b")
+	}
+}

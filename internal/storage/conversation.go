@@ -14,6 +14,12 @@ import (
 // ErrNotFound is returned by Load when no conversation with the given name exists.
 var ErrNotFound = errors.New("conversation not found")
 
+// ConvInfo holds summary information for a conversation.
+type ConvInfo struct {
+	Name string
+	Date string // "YYYY-MM-DD" (date portion of updated_at)
+}
+
 type Store struct {
 	db *sql.DB
 }
@@ -165,6 +171,28 @@ func (s *Store) List() ([]string, error) {
 		names = append(names, name)
 	}
 	return names, rows.Err()
+}
+
+// ListWithDate returns all conversations with their date string (YYYY-MM-DD),
+// ordered by most recently updated.
+func (s *Store) ListWithDate() ([]ConvInfo, error) {
+	rows, err := s.db.Query(
+		`SELECT name, date(updated_at) FROM conversations ORDER BY updated_at DESC, id DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var convs []ConvInfo
+	for rows.Next() {
+		var c ConvInfo
+		if err := rows.Scan(&c.Name, &c.Date); err != nil {
+			return nil, err
+		}
+		convs = append(convs, c)
+	}
+	return convs, rows.Err()
 }
 
 // Close releases the database connection.
