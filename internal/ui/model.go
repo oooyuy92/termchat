@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"context"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,9 +19,10 @@ const (
 	modeConfig
 )
 
-// streamChunkMsg carries a token from the streaming response.
+// streamChunkMsg carries a token and optional thinking text from the streaming response.
 type streamChunkMsg struct {
-	Content string
+	Content  string
+	Thinking string
 }
 
 // streamDoneMsg signals the stream has finished.
@@ -38,7 +40,7 @@ type commandResultMsg struct {
 
 // streamStartMsg carries the channels for consuming a streaming response.
 type streamStartMsg struct {
-	chunks <-chan string
+	chunks <-chan chat.StreamChunk
 	errs   <-chan error
 }
 
@@ -62,6 +64,10 @@ type configEditor struct {
 	editErr string
 }
 
+type streamControl struct {
+	cancel context.CancelFunc
+}
+
 type Model struct {
 	cfg      config.Config
 	client   *chat.Client
@@ -69,22 +75,30 @@ type Model struct {
 	store    *storage.Store
 	renderer *glamour.TermRenderer
 
+	// Theme
+	theme Theme
+
 	// Streaming channels
-	streamCh  <-chan string
+	streamCh  <-chan chat.StreamChunk
 	streamErr <-chan error
 
+	// Stream cancellation
+	streamCtrl *streamControl
+
 	// UI state
-	mode        uiMode
-	configEd    configEditor
-	cfgPath     string
-	input       string
-	streaming   bool
-	currentResp string
-	statusMsg   string
-	totalTokens int
-	width       int
-	height      int
-	err         error
+	mode            uiMode
+	configEd        configEditor
+	cfgPath         string
+	input           string
+	streaming       bool
+	quitting        bool
+	currentResp     string
+	currentThinking string
+	statusMsg       string
+	totalTokens     int
+	width           int
+	height          int
+	err             error
 }
 
 func NewModel(cfg config.Config, cfgPath string) (Model, error) {
@@ -109,6 +123,7 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 		store:    storage.New(storageDir),
 		renderer: renderer,
 		cfgPath:  cfgPath,
+		theme:    ThemeByName(cfg.Settings.Theme),
 	}, nil
 }
 

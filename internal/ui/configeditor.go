@@ -6,34 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/config"
-)
-
-var (
-	configTitleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("86"))
-
-	configCursorStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86")).
-		Bold(true)
-
-	configLabelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")).
-		Width(20)
-
-	configValueStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("117"))
-
-	configEditStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("229"))
-
-	configErrStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196"))
-
-	configHelpStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
 )
 
 func buildConfigFields(cfg config.Config) []configField {
@@ -44,6 +17,7 @@ func buildConfigFields(cfg config.Config) []configField {
 		{Label: "Temperature", Key: "temperature", Value: fmt.Sprintf("%.2f", cfg.Parameters.Temperature)},
 		{Label: "Max Tokens", Key: "max_tokens", Value: strconv.Itoa(cfg.Parameters.MaxTokens)},
 		{Label: "Reasoning Effort", Key: "reasoning_effort", Value: cfg.Parameters.ReasoningEffort},
+		{Label: "Theme", Key: "theme", Value: cfg.Settings.Theme},
 	}
 }
 
@@ -85,6 +59,11 @@ func validateField(key, value string) string {
 		if v != "" && v != "low" && v != "medium" && v != "high" {
 			return "must be low, medium, high, or empty"
 		}
+	case "theme":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v != "dark" && v != "light" {
+			return "must be dark or light"
+		}
 	}
 	return ""
 }
@@ -105,6 +84,8 @@ func applyFieldToConfig(cfg *config.Config, key, value string) {
 		cfg.Parameters.MaxTokens = n
 	case "reasoning_effort":
 		cfg.Parameters.ReasoningEffort = strings.ToLower(strings.TrimSpace(value))
+	case "theme":
+		cfg.Settings.Theme = strings.ToLower(strings.TrimSpace(value))
 	}
 }
 
@@ -133,6 +114,8 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			field.Value = ed.editBuf
 			applyFieldToConfig(&m.cfg, field.Key, ed.editBuf)
 			applyConfigToClient(m.client, m.cfg)
+			// Sync theme if theme field was changed
+			m.theme = ThemeByName(m.cfg.Settings.Theme)
 			ed.editing = false
 			ed.editErr = ""
 			return m, m.saveConfigCmd()
@@ -178,6 +161,7 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.mode = modeChat
 		m.statusMsg = "Back to chat"
 	case "ctrl+c":
+		m.quitting = true
 		return m, tea.Quit
 	}
 	return m, nil
@@ -196,20 +180,20 @@ func (m Model) viewConfigEditor() string {
 	var b strings.Builder
 	ed := m.configEd
 
-	b.WriteString(configTitleStyle.Render("Model & Parameters Configuration"))
+	b.WriteString(m.theme.ConfigTitleStyle().Render("Model & Parameters Configuration"))
 	b.WriteString("\n\n")
 
 	for i, field := range ed.fields {
 		cursor := "  "
 		if i == ed.cursor {
-			cursor = configCursorStyle.Render("> ")
+			cursor = m.theme.ConfigCursorStyle().Render("> ")
 		}
 
-		label := configLabelStyle.Render(field.Label + ":")
+		label := m.theme.ConfigLabelStyle().Render(field.Label + ":")
 
 		var value string
 		if ed.editing && i == ed.cursor {
-			value = configEditStyle.Render(ed.editBuf + "\u2588")
+			value = m.theme.ConfigEditStyle().Render(ed.editBuf + "\u2588")
 		} else {
 			displayVal := field.Value
 			if displayVal == "" {
@@ -217,7 +201,7 @@ func (m Model) viewConfigEditor() string {
 			} else if field.Masked {
 				displayVal = maskValue(displayVal)
 			}
-			value = configValueStyle.Render(displayVal)
+			value = m.theme.ConfigValueStyle().Render(displayVal)
 		}
 
 		b.WriteString(cursor + label + value + "\n")
@@ -226,13 +210,13 @@ func (m Model) viewConfigEditor() string {
 	b.WriteString("\n")
 
 	if ed.editErr != "" {
-		b.WriteString(configErrStyle.Render("  Error: "+ed.editErr) + "\n\n")
+		b.WriteString(m.theme.ConfigErrStyle().Render("  Error: "+ed.editErr) + "\n\n")
 	}
 
 	if ed.editing {
-		b.WriteString(configHelpStyle.Render("  Enter: confirm  |  Esc: cancel"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: confirm  |  Esc: cancel"))
 	} else {
-		b.WriteString(configHelpStyle.Render("  Up/Down: navigate  |  Enter: edit  |  Esc: back to chat"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Up/Down: navigate  |  Enter: edit  |  Esc: back to chat"))
 	}
 	b.WriteString("\n")
 

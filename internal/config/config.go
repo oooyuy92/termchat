@@ -11,6 +11,11 @@ type Config struct {
 	API        APIConfig        `yaml:"api"`
 	Parameters ParametersConfig `yaml:"parameters"`
 	Storage    StorageConfig    `yaml:"storage"`
+	Settings   SettingsConfig   `yaml:"settings"`
+}
+
+type SettingsConfig struct {
+	Theme string `yaml:"theme"`
 }
 
 type APIConfig struct {
@@ -41,6 +46,9 @@ func DefaultConfig() Config {
 		},
 		Storage: StorageConfig{
 			Dir: "~/.local/share/termchat/conversations",
+		},
+		Settings: SettingsConfig{
+			Theme: "dark",
 		},
 	}
 }

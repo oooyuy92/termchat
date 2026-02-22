@@ -4,11 +4,18 @@ package chat
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 )
+
+// StreamChunk carries both content and thinking text from a streaming response.
+type StreamChunk struct {
+	Content  string
+	Thinking string
+}
 
 type Client struct {
 	baseURL string
@@ -62,9 +69,12 @@ type chatRequest struct {
 type chatChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Thinking         string `json:"thinking"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
+		Thought      *bool   `json:"thought"`
 	} `json:"choices"`
 	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -73,7 +83,7 @@ type chatChunk struct {
 	} `json:"usage"`
 }
 
-func (c *Client) SendStream(messages []Message, temperature float64, maxTokens int, reasoningEffort string, onChunk func(string)) error {
+func (c *Client) SendStream(ctx context.Context, messages []Message, temperature float64, maxTokens int, reasoningEffort string, onChunk func(content, thinking string)) error {
 	reqBody := chatRequest{
 		Model:           c.model,
 		Messages:        messages,
@@ -88,7 +98,7 @@ func (c *Client) SendStream(messages []Message, temperature float64, maxTokens i
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -126,24 +136,41 @@ func (c *Client) SendStream(messages []Message, temperature float64, maxTokens i
 			continue
 		}
 
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			onChunk(chunk.Choices[0].Delta.Content)
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		delta := chunk.Choices[0].Delta
+		thinking := delta.ReasoningContent // OpenAI / DeepSeek
+		if thinking == "" {
+			thinking = delta.Thinking // Anthropic proxy
+		}
+		content := delta.Content
+
+		// Gemini: thought=true means content is actually thinking
+		if chunk.Choices[0].Thought != nil && *chunk.Choices[0].Thought {
+			thinking = content
+			content = ""
+		}
+
+		if content != "" || thinking != "" {
+			onChunk(content, thinking)
 		}
 	}
 
 	return scanner.Err()
 }
 
-// SendStreamChan wraps SendStream and returns channels for chunk-by-chunk consumption.
+// SendStreamChan wraps SendStream and returns a channel for chunk-by-chunk consumption.
 // This is designed for use with bubbletea's Cmd pattern where each chunk triggers
 // a new Cmd to read the next one.
-func (c *Client) SendStreamChan(messages []Message, temperature float64, maxTokens int, reasoningEffort string) (<-chan string, <-chan error) {
-	chunks := make(chan string, 10)
+func (c *Client) SendStreamChan(ctx context.Context, messages []Message, temperature float64, maxTokens int, reasoningEffort string) (<-chan StreamChunk, <-chan error) {
+	chunks := make(chan StreamChunk, 10)
 	errs := make(chan error, 1)
 	go func() {
 		defer close(chunks)
-		err := c.SendStream(messages, temperature, maxTokens, reasoningEffort, func(chunk string) {
-			chunks <- chunk
+		err := c.SendStream(ctx, messages, temperature, maxTokens, reasoningEffort, func(content, thinking string) {
+			chunks <- StreamChunk{Content: content, Thinking: thinking}
 		})
 		if err != nil {
 			errs <- err

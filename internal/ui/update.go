@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -9,6 +10,11 @@ import (
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Quitting guard: once quitting is set, always return Quit
+	if m.quitting {
+		return m, tea.Quit
+	}
+
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -23,6 +29,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.streaming {
 			if msg.String() == "ctrl+c" {
+				// Cancel the in-flight HTTP request
+				if m.streamCtrl != nil {
+					m.streamCtrl.cancel()
+				}
+				m.quitting = true
 				return m, tea.Quit
 			}
 			return m, nil
@@ -30,6 +41,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "ctrl+c":
+			m.quitting = true
 			return m, tea.Quit
 
 		case "enter":
@@ -46,9 +58,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.Add(chat.Message{Role: "user", Content: input})
 			m.streaming = true
 			m.currentResp = ""
+			m.currentThinking = ""
 			m.err = nil
 
-			return m, m.sendStreamCmd()
+			ctx, cancel := context.WithCancel(context.Background())
+			m.streamCtrl = &streamControl{cancel: cancel}
+
+			return m, m.sendStreamCmd(ctx)
 
 		case "backspace":
 			runes := []rune(m.input)
@@ -66,6 +82,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamChunkMsg:
 		m.currentResp += msg.Content
+		m.currentThinking += msg.Thinking
 		return m, m.readNextChunk()
 
 	case streamStartMsg:
@@ -79,12 +96,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.Add(chat.Message{Role: "assistant", Content: m.currentResp})
 		}
 		m.currentResp = ""
+		m.currentThinking = ""
 		return m, nil
 
 	case streamErrMsg:
 		m.streaming = false
 		m.err = msg.Err
 		m.currentResp = ""
+		m.currentThinking = ""
 		return m, nil
 
 	case commandResultMsg:
@@ -103,7 +122,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) sendStreamCmd() tea.Cmd {
+func (m Model) sendStreamCmd(ctx context.Context) tea.Cmd {
 	messages := m.history.ToAPIMessages()
 	client := m.client
 	temp := m.cfg.Parameters.Temperature
@@ -111,7 +130,7 @@ func (m Model) sendStreamCmd() tea.Cmd {
 	reasoningEffort := m.cfg.Parameters.ReasoningEffort
 
 	return func() tea.Msg {
-		chunks, errs := client.SendStreamChan(messages, temp, maxTok, reasoningEffort)
+		chunks, errs := client.SendStreamChan(ctx, messages, temp, maxTok, reasoningEffort)
 		return streamStartMsg{chunks: chunks, errs: errs}
 	}
 }
@@ -133,7 +152,7 @@ func (m Model) readNextChunk() tea.Cmd {
 				}
 				return streamDoneMsg{}
 			}
-			return streamChunkMsg{Content: chunk}
+			return streamChunkMsg{Content: chunk.Content, Thinking: chunk.Thinking}
 		case err := <-errCh:
 			return streamErrMsg{Err: err}
 		}

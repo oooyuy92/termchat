@@ -11,3 +11,6 @@ parameters:
 
 storage:
   dir: "~/.local/share/termchat/conversations"
+
+settings:
+  theme: "dark"  # dark or light
