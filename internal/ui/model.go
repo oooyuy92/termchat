@@ -76,14 +76,6 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	return m, nil
-}
-
-func (m Model) View() string {
-	return ""
-}
-
 // SetProgram stores a reference to the tea.Program for sending messages from goroutines.
 func (m *Model) SetProgram(p *tea.Program) {
 	m.program = p
