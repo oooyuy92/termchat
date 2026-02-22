@@ -2,7 +2,6 @@
 package storage
 
 import (
-	"database/sql"
 	"testing"
 
 	"github.com/termchat/termchat/internal/chat"
@@ -41,6 +40,9 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded[0].Content != "hello" {
 		t.Errorf("loaded[0].Content = %q, want %q", loaded[0].Content, "hello")
 	}
+	if loaded[0].Role != "user" {
+		t.Errorf("loaded[0].Role = %q, want %q", loaded[0].Role, "user")
+	}
 	if loaded[1].Role != "assistant" {
 		t.Errorf("loaded[1].Role = %q, want %q", loaded[1].Role, "assistant")
 	}
@@ -69,8 +71,8 @@ func TestLoadNotFound(t *testing.T) {
 	store := newTestStore(t)
 
 	_, err := store.Load("nonexistent")
-	if err != sql.ErrNoRows {
-		t.Errorf("Load() error = %v, want sql.ErrNoRows", err)
+	if err != ErrNotFound {
+		t.Errorf("Load() error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -90,6 +92,10 @@ func TestList(t *testing.T) {
 	}
 	if len(names) != 2 {
 		t.Fatalf("List() len = %d, want 2", len(names))
+	}
+	// conv-b was saved last so it should appear first (ORDER BY updated_at DESC)
+	if names[0] != "conv-b" || names[1] != "conv-a" {
+		t.Errorf("List() = %v, want [conv-b conv-a]", names)
 	}
 }
 

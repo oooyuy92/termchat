@@ -33,8 +33,12 @@ func main() {
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	finalModel, runErr := p.Run()
+	if uiModel, ok := finalModel.(ui.Model); ok {
+		uiModel.Close()
+	}
+	if runErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
 		os.Exit(1)
 	}
 }

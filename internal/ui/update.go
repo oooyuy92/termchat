@@ -133,6 +133,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case autoSavedMsg:
+		if msg.Err != nil {
+			m.statusMsg = "Auto-save failed: " + msg.Err.Error()
+		}
 		return m, nil
 	}
 
@@ -181,8 +184,8 @@ func (m Model) autoSaveCmd() tea.Cmd {
 	store := m.store
 	name := m.autoSaveName
 	return func() tea.Msg {
-		_ = store.Save(name, msgs)
-		return autoSavedMsg{}
+		err := store.Save(name, msgs)
+		return autoSavedMsg{Err: err}
 	}
 }
 

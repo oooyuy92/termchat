@@ -53,8 +53,8 @@ type configSavedMsg struct {
 	Err error
 }
 
-// autoSavedMsg is the no-op result from a background auto-save.
-type autoSavedMsg struct{}
+// autoSavedMsg carries the result of a background auto-save (Err may be nil).
+type autoSavedMsg struct{ Err error }
 
 type configField struct {
 	Label   string
@@ -165,6 +165,12 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 
 func (m Model) Init() tea.Cmd {
 	return nil
+}
+
+func (m Model) Close() {
+	if m.store != nil {
+		m.store.Close()
+	}
 }
 
 func (m *Model) recreateRenderer(width int) {

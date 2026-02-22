@@ -3,12 +3,16 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 
 	"github.com/termchat/termchat/internal/chat"
 	_ "modernc.org/sqlite"
 )
+
+// ErrNotFound is returned by Load when no conversation with the given name exists.
+var ErrNotFound = errors.New("conversation not found")
 
 type Store struct {
 	db *sql.DB
@@ -24,6 +28,8 @@ func New(dir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Use a single connection so PRAGMA settings apply to all operations.
+	db.SetMaxOpenConns(1)
 	// Enable foreign key enforcement (SQLite disables it by default).
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		db.Close()
@@ -109,14 +115,14 @@ func (s *Store) Save(name string, messages []chat.Message) error {
 }
 
 // Load returns all messages for the named conversation ordered by seq.
-// Returns sql.ErrNoRows if no conversation with that name exists.
+// Returns ErrNotFound if no conversation with that name exists.
 // Returns an empty slice (not an error) if the conversation exists but has no messages.
 func (s *Store) Load(name string) ([]chat.Message, error) {
 	// Check conversation exists.
 	var convID int64
 	err := s.db.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID)
 	if err == sql.ErrNoRows {
-		return nil, sql.ErrNoRows
+		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
