@@ -29,13 +29,22 @@ type commandResultMsg struct {
 	Text string
 }
 
+// streamStartMsg carries the channels for consuming a streaming response.
+type streamStartMsg struct {
+	chunks <-chan string
+	errs   <-chan error
+}
+
 type Model struct {
 	cfg      config.Config
 	client   *chat.Client
 	history  *chat.History
 	store    *storage.Store
 	renderer *glamour.TermRenderer
-	program  *tea.Program
+
+	// Streaming channels
+	streamCh  <-chan string
+	streamErr <-chan error
 
 	// UI state
 	input       string
@@ -74,9 +83,4 @@ func NewModel(cfg config.Config) (Model, error) {
 
 func (m Model) Init() tea.Cmd {
 	return nil
-}
-
-// SetProgram stores a reference to the tea.Program for sending messages from goroutines.
-func (m *Model) SetProgram(p *tea.Program) {
-	m.program = p
 }

@@ -115,3 +115,21 @@ func (c *Client) SendStream(messages []Message, temperature float64, maxTokens i
 
 	return scanner.Err()
 }
+
+// SendStreamChan wraps SendStream and returns channels for chunk-by-chunk consumption.
+// This is designed for use with bubbletea's Cmd pattern where each chunk triggers
+// a new Cmd to read the next one.
+func (c *Client) SendStreamChan(messages []Message, temperature float64, maxTokens int) (<-chan string, <-chan error) {
+	chunks := make(chan string, 10)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(chunks)
+		err := c.SendStream(messages, temperature, maxTokens, func(chunk string) {
+			chunks <- chunk
+		})
+		if err != nil {
+			errs <- err
+		}
+	}()
+	return chunks, errs
+}

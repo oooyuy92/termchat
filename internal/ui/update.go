@@ -62,7 +62,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamChunkMsg:
 		m.currentResp += msg.Content
-		return m, nil
+		return m, m.readNextChunk()
+
+	case streamStartMsg:
+		m.streamCh = msg.chunks
+		m.streamErr = msg.errs
+		return m, m.readNextChunk()
 
 	case streamDoneMsg:
 		m.streaming = false
@@ -91,18 +96,34 @@ func (m Model) sendStreamCmd() tea.Cmd {
 	client := m.client
 	temp := m.cfg.Parameters.Temperature
 	maxTok := m.cfg.Parameters.MaxTokens
-	p := m.program
 
 	return func() tea.Msg {
-		err := client.SendStream(messages, temp, maxTok, func(chunk string) {
-			if p != nil {
-				p.Send(streamChunkMsg{Content: chunk})
+		chunks, errs := client.SendStreamChan(messages, temp, maxTok)
+		return streamStartMsg{chunks: chunks, errs: errs}
+	}
+}
+
+func (m Model) readNextChunk() tea.Cmd {
+	ch := m.streamCh
+	errCh := m.streamErr
+	return func() tea.Msg {
+		select {
+		case chunk, ok := <-ch:
+			if !ok {
+				// Channel closed, check for errors
+				select {
+				case err := <-errCh:
+					if err != nil {
+						return streamErrMsg{Err: err}
+					}
+				default:
+				}
+				return streamDoneMsg{}
 			}
-		})
-		if err != nil {
+			return streamChunkMsg{Content: chunk}
+		case err := <-errCh:
 			return streamErrMsg{Err: err}
 		}
-		return streamDoneMsg{}
 	}
 }
 
