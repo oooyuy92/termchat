@@ -203,7 +203,7 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		m.statusMsg = "Conversation cleared"
 		return m, nil
 
-	case "/model":
+	case "/settings":
 		if len(parts) < 2 {
 			// No argument: enter config editor mode
 			m.mode = modeConfig
