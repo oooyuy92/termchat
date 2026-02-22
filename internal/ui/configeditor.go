@@ -16,8 +16,8 @@ func buildConfigFields(cfg config.Config) []configField {
 		{Label: "Model", Key: "model", Value: cfg.API.Model},
 		{Label: "Temperature", Key: "temperature", Value: fmt.Sprintf("%.2f", cfg.Parameters.Temperature)},
 		{Label: "Max Tokens", Key: "max_tokens", Value: strconv.Itoa(cfg.Parameters.MaxTokens)},
-		{Label: "Reasoning Effort", Key: "reasoning_effort", Value: cfg.Parameters.ReasoningEffort},
-		{Label: "Theme", Key: "theme", Value: cfg.Settings.Theme},
+		{Label: "Reasoning Effort", Key: "reasoning_effort", Value: cfg.Parameters.ReasoningEffort, Options: []string{"", "low", "medium", "high"}},
+		{Label: "Theme", Key: "theme", Value: cfg.Settings.Theme, Options: []string{"dark", "light"}},
 	}
 }
 
@@ -102,6 +102,11 @@ func applyConfigToClient(client interface {
 func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 	ed := &m.configEd
 
+	// Reset confirmQuit on any key other than ctrl+c
+	if msg.String() != "ctrl+c" {
+		m.confirmQuit = false
+	}
+
 	if ed.editing {
 		switch msg.String() {
 		case "enter":
@@ -153,7 +158,23 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			ed.cursor++
 		}
 	case "enter":
-		field := ed.fields[ed.cursor]
+		field := &ed.fields[ed.cursor]
+		if len(field.Options) > 0 {
+			// Cycle through options
+			idx := 0
+			for i, opt := range field.Options {
+				if opt == field.Value {
+					idx = i
+					break
+				}
+			}
+			idx = (idx + 1) % len(field.Options)
+			field.Value = field.Options[idx]
+			applyFieldToConfig(&m.cfg, field.Key, field.Value)
+			applyConfigToClient(m.client, m.cfg)
+			m.theme = ThemeByName(m.cfg.Settings.Theme)
+			return m, m.saveConfigCmd()
+		}
 		ed.editing = true
 		ed.editBuf = field.Value
 		ed.editErr = ""
@@ -161,8 +182,11 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.mode = modeChat
 		m.statusMsg = "Back to chat"
 	case "ctrl+c":
-		m.quitting = true
-		return m, tea.Quit
+		if m.confirmQuit {
+			return m, tea.Quit
+		}
+		m.confirmQuit = true
+		m.statusMsg = "Press Ctrl+C again to quit"
 	}
 	return m, nil
 }
@@ -202,6 +226,17 @@ func (m Model) viewConfigEditor() string {
 				displayVal = maskValue(displayVal)
 			}
 			value = m.theme.ConfigValueStyle().Render(displayVal)
+			if len(field.Options) > 0 {
+				optStrs := make([]string, len(field.Options))
+				for j, opt := range field.Options {
+					if opt == "" {
+						optStrs[j] = "(not set)"
+					} else {
+						optStrs[j] = opt
+					}
+				}
+				value += "  [" + strings.Join(optStrs, " | ") + "]"
+			}
 		}
 
 		b.WriteString(cursor + label + value + "\n")
@@ -216,7 +251,7 @@ func (m Model) viewConfigEditor() string {
 	if ed.editing {
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: confirm  |  Esc: cancel"))
 	} else {
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  Up/Down: navigate  |  Enter: edit  |  Esc: back to chat"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Up/Down: navigate  |  Enter: edit/cycle  |  Esc: back to chat"))
 	}
 	b.WriteString("\n")
 

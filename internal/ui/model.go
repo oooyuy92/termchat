@@ -50,10 +50,11 @@ type configSavedMsg struct {
 }
 
 type configField struct {
-	Label  string
-	Key    string
-	Value  string
-	Masked bool
+	Label   string
+	Key     string
+	Value   string
+	Masked  bool
+	Options []string // If non-empty, cycle through these with Enter instead of free text editing
 }
 
 type configEditor struct {
@@ -91,7 +92,7 @@ type Model struct {
 	cfgPath         string
 	input           string
 	streaming       bool
-	quitting        bool
+	confirmQuit     bool
 	currentResp     string
 	currentThinking string
 	statusMsg       string
@@ -104,7 +105,7 @@ type Model struct {
 func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(0),
+		glamour.WithWordWrap(80),
 	)
 	if err != nil {
 		return Model{}, err
@@ -129,4 +130,14 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 
 func (m Model) Init() tea.Cmd {
 	return nil
+}
+
+func (m *Model) recreateRenderer(width int) {
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err == nil {
+		m.renderer = r
+	}
 }

@@ -10,16 +10,12 @@ import (
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Quitting guard: once quitting is set, always return Quit
-	if m.quitting {
-		return m, tea.Quit
-	}
-
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.recreateRenderer(msg.Width)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -29,20 +25,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.streaming {
 			if msg.String() == "ctrl+c" {
+				if m.confirmQuit {
+					return m, tea.Quit
+				}
 				// Cancel the in-flight HTTP request
 				if m.streamCtrl != nil {
 					m.streamCtrl.cancel()
 				}
-				m.quitting = true
-				return m, tea.Quit
+				m.streaming = false
+				m.currentResp = ""
+				m.currentThinking = ""
+				m.confirmQuit = true
+				m.statusMsg = "Press Ctrl+C again to quit"
+				return m, nil
 			}
 			return m, nil
 		}
 
+		// Reset confirmQuit on any key other than ctrl+c
+		if msg.String() != "ctrl+c" {
+			m.confirmQuit = false
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
+			if m.confirmQuit {
+				return m, tea.Quit
+			}
+			m.confirmQuit = true
+			m.statusMsg = "Press Ctrl+C again to quit"
+			return m, nil
 
 		case "enter":
 			input := strings.TrimSpace(m.input)
