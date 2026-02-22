@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/storage"
@@ -102,18 +103,21 @@ type Model struct {
 	err             error
 }
 
-func glamourStyle(theme string) glamour.TermRendererOption {
+func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
+	s := styles.DarkStyleConfig
 	if theme == "light" {
-		return glamour.WithStandardStyle("light")
+		s = styles.LightStyleConfig
 	}
-	return glamour.WithStandardStyle("dark")
+	zero := uint(0)
+	s.Document.Margin = &zero
+	return glamour.NewTermRenderer(
+		glamour.WithStyles(s),
+		glamour.WithWordWrap(width),
+	)
 }
 
 func NewModel(cfg config.Config, cfgPath string) (Model, error) {
-	renderer, err := glamour.NewTermRenderer(
-		glamourStyle(cfg.Settings.Theme),
-		glamour.WithWordWrap(80),
-	)
+	renderer, err := buildRenderer(cfg.Settings.Theme, 80)
 	if err != nil {
 		return Model{}, err
 	}
@@ -140,10 +144,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) recreateRenderer(width int) {
-	r, err := glamour.NewTermRenderer(
-		glamourStyle(m.cfg.Settings.Theme),
-		glamour.WithWordWrap(width),
-	)
+	r, err := buildRenderer(m.cfg.Settings.Theme, width)
 	if err == nil {
 		m.renderer = r
 	}

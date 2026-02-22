@@ -6,40 +6,12 @@ import (
 	"strings"
 )
 
-// cleanGlamourOutput strips glamour's leading/trailing newlines and
-// auto-detects the document margin to remove indentation from each line.
+// cleanGlamourOutput strips glamour's leading/trailing blank lines.
+// Document margin is already 0 at renderer creation, so no space stripping needed.
 func cleanGlamourOutput(s string) string {
 	s = strings.TrimLeft(s, "\n")
 	s = strings.TrimRight(s, " \n")
-	lines := strings.Split(s, "\n")
-
-	// Auto-detect margin from first non-empty line
-	margin := 0
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			for _, ch := range line {
-				if ch == ' ' {
-					margin++
-				} else {
-					break
-				}
-			}
-			break
-		}
-	}
-
-	// Strip detected margin from all lines
-	if margin > 0 {
-		prefix := strings.Repeat(" ", margin)
-		for i, line := range lines {
-			if strings.HasPrefix(line, prefix) {
-				lines[i] = line[margin:]
-			}
-		}
-	}
-
-	return strings.Join(lines, "\n")
+	return s
 }
 
 func (m Model) View() string {
@@ -70,7 +42,8 @@ func (m Model) View() string {
 	if m.streaming {
 		b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
 		if m.currentThinking != "" {
-			b.WriteString(m.theme.ThinkingStyle().Render("\U0001f4ad "+m.currentThinking) + "\n")
+			thinking := strings.ReplaceAll(strings.TrimSpace(m.currentThinking), "\n\n", "\n")
+			b.WriteString(m.theme.ThinkingStyle().Render("\U0001f4ad "+thinking) + "\n")
 		}
 		if m.currentResp != "" {
 			rendered, err := m.renderer.Render(m.currentResp)
