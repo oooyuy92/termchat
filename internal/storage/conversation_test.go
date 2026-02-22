@@ -49,8 +49,12 @@ func TestSaveAndLoad(t *testing.T) {
 func TestSaveOverwrites(t *testing.T) {
 	store := newTestStore(t)
 
-	store.Save("conv", []chat.Message{{Role: "user", Content: "first"}})
-	store.Save("conv", []chat.Message{{Role: "user", Content: "second"}})
+	if err := store.Save("conv", []chat.Message{{Role: "user", Content: "first"}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Save("conv", []chat.Message{{Role: "user", Content: "second"}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
 
 	loaded, err := store.Load("conv")
 	if err != nil {
@@ -73,8 +77,12 @@ func TestLoadNotFound(t *testing.T) {
 func TestList(t *testing.T) {
 	store := newTestStore(t)
 
-	store.Save("conv-a", []chat.Message{{Role: "user", Content: "a"}})
-	store.Save("conv-b", []chat.Message{{Role: "user", Content: "b"}})
+	if err := store.Save("conv-a", []chat.Message{{Role: "user", Content: "a"}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Save("conv-b", []chat.Message{{Role: "user", Content: "b"}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
 
 	names, err := store.List()
 	if err != nil {
