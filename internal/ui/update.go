@@ -24,6 +24,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeConfig {
 			return m.updateConfigMode(msg)
 		}
+		if m.mode == modeResume {
+			return m.updateResumeMode(msg)
+		}
 
 		if m.streaming {
 			if msg.String() == "ctrl+c" {
@@ -258,6 +261,16 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMsg = "Saved: " + strings.Join(names, ", ")
 		}
+		return m, nil
+
+	case "/resume":
+		convs, err := m.store.ListWithDate()
+		if err != nil {
+			m.statusMsg = "Failed to load conversations: " + err.Error()
+			return m, nil
+		}
+		m.resumePick = buildResumePicker(convs)
+		m.mode = modeResume
 		return m, nil
 
 	default:

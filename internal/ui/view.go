@@ -33,6 +33,9 @@ func (m Model) View() string {
 	if m.mode == modeConfig {
 		return m.viewConfigEditor()
 	}
+	if m.mode == modeResume {
+		return m.viewResumePicker()
+	}
 
 	var b strings.Builder
 
