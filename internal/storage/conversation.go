@@ -24,6 +24,11 @@ func New(dir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Enable foreign key enforcement (SQLite disables it by default).
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, err
@@ -32,21 +37,34 @@ func New(dir string) (*Store, error) {
 }
 
 func migrate(db *sql.DB) error {
-	_, err := db.Exec(`
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`
 		CREATE TABLE IF NOT EXISTS conversations (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			name       TEXT NOT NULL UNIQUE,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
+		)
+	`)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`
 		CREATE TABLE IF NOT EXISTS messages (
 			id              INTEGER PRIMARY KEY AUTOINCREMENT,
 			conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
 			role            TEXT NOT NULL,
 			content         TEXT NOT NULL,
 			seq             INTEGER NOT NULL
-		);
+		)
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Save writes all messages for the named conversation, replacing any prior messages.
@@ -90,22 +108,30 @@ func (s *Store) Save(name string, messages []chat.Message) error {
 	return tx.Commit()
 }
 
-// Load returns all messages for the named conversation, ordered by seq.
+// Load returns all messages for the named conversation ordered by seq.
+// Returns sql.ErrNoRows if no conversation with that name exists.
+// Returns an empty slice (not an error) if the conversation exists but has no messages.
 func (s *Store) Load(name string) ([]chat.Message, error) {
+	// Check conversation exists.
+	var convID int64
+	err := s.db.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID)
+	if err == sql.ErrNoRows {
+		return nil, sql.ErrNoRows
+	}
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := s.db.Query(
-		`SELECT m.role, m.content
-		 FROM messages m
-		 JOIN conversations c ON c.id = m.conversation_id
-		 WHERE c.name = ?
-		 ORDER BY m.seq`,
-		name,
+		`SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY seq`,
+		convID,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var messages []chat.Message
+	messages := []chat.Message{}
 	for rows.Next() {
 		var msg chat.Message
 		if err := rows.Scan(&msg.Role, &msg.Content); err != nil {
@@ -113,24 +139,18 @@ func (s *Store) Load(name string) ([]chat.Message, error) {
 		}
 		messages = append(messages, msg)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if messages == nil {
-		return nil, sql.ErrNoRows
-	}
-	return messages, nil
+	return messages, rows.Err()
 }
 
 // List returns all conversation names ordered by most recently updated.
 func (s *Store) List() ([]string, error) {
-	rows, err := s.db.Query(`SELECT name FROM conversations ORDER BY updated_at DESC`)
+	rows, err := s.db.Query(`SELECT name FROM conversations ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var names []string
+	names := []string{}
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {

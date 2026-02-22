@@ -2,24 +2,31 @@
 package storage
 
 import (
-	"os"
-	"path/filepath"
+	"database/sql"
 	"testing"
 
 	"github.com/termchat/termchat/internal/chat"
 )
 
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
 func TestSaveAndLoad(t *testing.T) {
-	dir := t.TempDir()
-	store := New(dir)
+	store := newTestStore(t)
 
 	messages := []chat.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi there"},
 	}
 
-	err := store.Save("test-conv", messages)
-	if err != nil {
+	if err := store.Save("test-conv", messages); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
@@ -34,16 +41,37 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded[0].Content != "hello" {
 		t.Errorf("loaded[0].Content = %q, want %q", loaded[0].Content, "hello")
 	}
+	if loaded[1].Role != "assistant" {
+		t.Errorf("loaded[1].Role = %q, want %q", loaded[1].Role, "assistant")
+	}
+}
 
-	path := filepath.Join(dir, "test-conv.json")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Errorf("expected file %s to exist", path)
+func TestSaveOverwrites(t *testing.T) {
+	store := newTestStore(t)
+
+	store.Save("conv", []chat.Message{{Role: "user", Content: "first"}})
+	store.Save("conv", []chat.Message{{Role: "user", Content: "second"}})
+
+	loaded, err := store.Load("conv")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Content != "second" {
+		t.Errorf("expected only second message, got %+v", loaded)
+	}
+}
+
+func TestLoadNotFound(t *testing.T) {
+	store := newTestStore(t)
+
+	_, err := store.Load("nonexistent")
+	if err != sql.ErrNoRows {
+		t.Errorf("Load() error = %v, want sql.ErrNoRows", err)
 	}
 }
 
 func TestList(t *testing.T) {
-	dir := t.TempDir()
-	store := New(dir)
+	store := newTestStore(t)
 
 	store.Save("conv-a", []chat.Message{{Role: "user", Content: "a"}})
 	store.Save("conv-b", []chat.Message{{Role: "user", Content: "b"}})
@@ -52,8 +80,19 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-
 	if len(names) != 2 {
 		t.Fatalf("List() len = %d, want 2", len(names))
+	}
+}
+
+func TestListEmpty(t *testing.T) {
+	store := newTestStore(t)
+
+	names, err := store.List()
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("List() = %v, want empty", names)
 	}
 }
