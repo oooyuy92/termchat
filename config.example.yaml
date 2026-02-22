@@ -1,0 +1,12 @@
+# config.example.yaml
+api:
+  base_url: "https://api.openai.com/v1"
+  api_key: "your-api-key-here"
+  model: "gpt-4o"
+
+parameters:
+  temperature: 0.7
+  max_tokens: 4096
+
+storage:
+  dir: "~/.local/share/termchat/conversations"
