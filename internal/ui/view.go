@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+// cleanGlamourOutput strips glamour's leading newlines, trailing whitespace,
+// and 2-space document margin from each line.
+func cleanGlamourOutput(s string) string {
+	s = strings.TrimLeft(s, "\n")
+	s = strings.TrimRight(s, " \n")
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "  ") {
+			lines[i] = line[2:]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) View() string {
 	if m.mode == modeConfig {
 		return m.viewConfigEditor()
@@ -18,14 +32,14 @@ func (m Model) View() string {
 		switch msg.Role {
 		case "user":
 			b.WriteString(m.theme.UserLabelStyle().Render("You:") + "\n")
-			b.WriteString(msg.Content + "\n")
+			b.WriteString(msg.Content + "\n\n")
 		case "assistant":
 			b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
 			rendered, err := m.renderer.Render(msg.Content)
 			if err != nil {
-				b.WriteString(msg.Content + "\n")
+				b.WriteString(msg.Content + "\n\n")
 			} else {
-				b.WriteString(rendered)
+				b.WriteString(cleanGlamourOutput(rendered) + "\n\n")
 			}
 		}
 	}
@@ -41,7 +55,7 @@ func (m Model) View() string {
 			if err != nil {
 				b.WriteString(m.currentResp)
 			} else {
-				b.WriteString(rendered)
+				b.WriteString(cleanGlamourOutput(rendered) + "\n")
 			}
 		}
 		b.WriteString("\u2588\n")

@@ -121,6 +121,9 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			applyConfigToClient(m.client, m.cfg)
 			// Sync theme if theme field was changed
 			m.theme = ThemeByName(m.cfg.Settings.Theme)
+			if field.Key == "theme" {
+				m.recreateRenderer(m.width)
+			}
 			ed.editing = false
 			ed.editErr = ""
 			return m, m.saveConfigCmd()
@@ -173,6 +176,9 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			applyFieldToConfig(&m.cfg, field.Key, field.Value)
 			applyConfigToClient(m.client, m.cfg)
 			m.theme = ThemeByName(m.cfg.Settings.Theme)
+			if field.Key == "theme" {
+				m.recreateRenderer(m.width)
+			}
 			return m, m.saveConfigCmd()
 		}
 		ed.editing = true

@@ -102,9 +102,16 @@ type Model struct {
 	err             error
 }
 
+func glamourStyle(theme string) glamour.TermRendererOption {
+	if theme == "light" {
+		return glamour.WithStandardStyle("light")
+	}
+	return glamour.WithStandardStyle("dark")
+}
+
 func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamourStyle(cfg.Settings.Theme),
 		glamour.WithWordWrap(80),
 	)
 	if err != nil {
@@ -134,7 +141,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m *Model) recreateRenderer(width int) {
 	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamourStyle(m.cfg.Settings.Theme),
 		glamour.WithWordWrap(width),
 	)
 	if err == nil {
