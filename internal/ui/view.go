@@ -26,6 +26,10 @@ var (
 )
 
 func (m Model) View() string {
+	if m.mode == modeConfig {
+		return m.viewConfigEditor()
+	}
+
 	var b strings.Builder
 
 	// Render conversation history

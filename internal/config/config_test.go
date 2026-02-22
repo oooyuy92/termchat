@@ -16,6 +16,7 @@ func TestLoadConfig(t *testing.T) {
 parameters:
   temperature: 0.7
   max_tokens: 4096
+  reasoning_effort: "high"
 storage:
   dir: "/tmp/termchat/conversations"
 `)
@@ -42,6 +43,9 @@ storage:
 	}
 	if cfg.Parameters.MaxTokens != 4096 {
 		t.Errorf("MaxTokens = %d, want %d", cfg.Parameters.MaxTokens, 4096)
+	}
+	if cfg.Parameters.ReasoningEffort != "high" {
+		t.Errorf("ReasoningEffort = %q, want %q", cfg.Parameters.ReasoningEffort, "high")
 	}
 }
 
@@ -71,5 +75,54 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	if cfg.Parameters.MaxTokens != 4096 {
 		t.Errorf("default MaxTokens = %d, want %d", cfg.Parameters.MaxTokens, 4096)
+	}
+}
+
+func TestSaveConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "subdir", "config.yaml")
+
+	cfg := Config{
+		API: APIConfig{
+			BaseURL: "https://api.example.com/v1",
+			APIKey:  "sk-test",
+			Model:   "gpt-4o-mini",
+		},
+		Parameters: ParametersConfig{
+			Temperature:     0.5,
+			MaxTokens:       2048,
+			ReasoningEffort: "medium",
+		},
+		Storage: StorageConfig{
+			Dir: "/tmp/test",
+		},
+	}
+
+	if err := Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() after Save() error = %v", err)
+	}
+
+	if loaded.API.BaseURL != cfg.API.BaseURL {
+		t.Errorf("BaseURL = %q, want %q", loaded.API.BaseURL, cfg.API.BaseURL)
+	}
+	if loaded.API.APIKey != cfg.API.APIKey {
+		t.Errorf("APIKey = %q, want %q", loaded.API.APIKey, cfg.API.APIKey)
+	}
+	if loaded.API.Model != cfg.API.Model {
+		t.Errorf("Model = %q, want %q", loaded.API.Model, cfg.API.Model)
+	}
+	if loaded.Parameters.Temperature != cfg.Parameters.Temperature {
+		t.Errorf("Temperature = %f, want %f", loaded.Parameters.Temperature, cfg.Parameters.Temperature)
+	}
+	if loaded.Parameters.MaxTokens != cfg.Parameters.MaxTokens {
+		t.Errorf("MaxTokens = %d, want %d", loaded.Parameters.MaxTokens, cfg.Parameters.MaxTokens)
+	}
+	if loaded.Parameters.ReasoningEffort != cfg.Parameters.ReasoningEffort {
+		t.Errorf("ReasoningEffort = %q, want %q", loaded.Parameters.ReasoningEffort, cfg.Parameters.ReasoningEffort)
 	}
 }

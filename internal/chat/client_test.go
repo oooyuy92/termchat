@@ -44,7 +44,7 @@ func TestClient_SendStream(t *testing.T) {
 	messages := []Message{{Role: "user", Content: "hi"}}
 	var collected strings.Builder
 
-	err := client.SendStream(messages, 0.7, 100, func(chunk string) {
+	err := client.SendStream(messages, 0.7, 100, "", func(chunk string) {
 		collected.WriteString(chunk)
 	})
 	if err != nil {

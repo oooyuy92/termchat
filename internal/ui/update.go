@@ -17,6 +17,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.mode == modeConfig {
+			return m.updateConfigMode(msg)
+		}
+
 		if m.streaming {
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -86,6 +90,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commandResultMsg:
 		m.statusMsg = msg.Text
 		return m, nil
+
+	case configSavedMsg:
+		if msg.Err != nil {
+			m.statusMsg = "Config save failed: " + msg.Err.Error()
+		} else {
+			m.statusMsg = "Config saved"
+		}
+		return m, nil
 	}
 
 	return m, nil
@@ -96,9 +108,10 @@ func (m Model) sendStreamCmd() tea.Cmd {
 	client := m.client
 	temp := m.cfg.Parameters.Temperature
 	maxTok := m.cfg.Parameters.MaxTokens
+	reasoningEffort := m.cfg.Parameters.ReasoningEffort
 
 	return func() tea.Msg {
-		chunks, errs := client.SendStreamChan(messages, temp, maxTok)
+		chunks, errs := client.SendStreamChan(messages, temp, maxTok, reasoningEffort)
 		return streamStartMsg{chunks: chunks, errs: errs}
 	}
 }
@@ -143,12 +156,17 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 
 	case "/model":
 		if len(parts) < 2 {
-			m.statusMsg = "Usage: /model <name>"
+			// No argument: enter config editor mode
+			m.mode = modeConfig
+			m.configEd = configEditor{
+				fields: buildConfigFields(m.cfg),
+			}
 			return m, nil
 		}
 		m.client.SetModel(parts[1])
+		m.cfg.API.Model = parts[1]
 		m.statusMsg = "Model set to " + parts[1]
-		return m, nil
+		return m, m.saveConfigCmd()
 
 	case "/save":
 		name := "default"

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,8 +20,9 @@ type APIConfig struct {
 }
 
 type ParametersConfig struct {
-	Temperature float64 `yaml:"temperature"`
-	MaxTokens   int     `yaml:"max_tokens"`
+	Temperature     float64 `yaml:"temperature"`
+	MaxTokens       int     `yaml:"max_tokens"`
+	ReasoningEffort string  `yaml:"reasoning_effort,omitempty"`
 }
 
 type StorageConfig struct {
@@ -65,4 +67,15 @@ func ConfigDir() string {
 
 func DefaultConfigPath() string {
 	return ConfigDir() + "/config.yaml"
+}
+
+func Save(path string, cfg Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }

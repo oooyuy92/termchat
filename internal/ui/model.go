@@ -11,6 +11,13 @@ import (
 	"github.com/termchat/termchat/internal/storage"
 )
 
+type uiMode int
+
+const (
+	modeChat uiMode = iota
+	modeConfig
+)
+
 // streamChunkMsg carries a token from the streaming response.
 type streamChunkMsg struct {
 	Content string
@@ -35,6 +42,26 @@ type streamStartMsg struct {
 	errs   <-chan error
 }
 
+// configSavedMsg signals that config was saved to disk.
+type configSavedMsg struct {
+	Err error
+}
+
+type configField struct {
+	Label  string
+	Key    string
+	Value  string
+	Masked bool
+}
+
+type configEditor struct {
+	fields  []configField
+	cursor  int
+	editing bool
+	editBuf string
+	editErr string
+}
+
 type Model struct {
 	cfg      config.Config
 	client   *chat.Client
@@ -47,6 +74,9 @@ type Model struct {
 	streamErr <-chan error
 
 	// UI state
+	mode        uiMode
+	configEd    configEditor
+	cfgPath     string
 	input       string
 	streaming   bool
 	currentResp string
@@ -57,7 +87,7 @@ type Model struct {
 	err         error
 }
 
-func NewModel(cfg config.Config) (Model, error) {
+func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithWordWrap(0),
@@ -78,6 +108,7 @@ func NewModel(cfg config.Config) (Model, error) {
 		history:  chat.NewHistory(),
 		store:    storage.New(storageDir),
 		renderer: renderer,
+		cfgPath:  cfgPath,
 	}, nil
 }
 

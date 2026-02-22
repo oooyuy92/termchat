@@ -34,12 +34,29 @@ func (c *Client) Model() string {
 	return c.model
 }
 
+func (c *Client) SetBaseURL(url string) {
+	c.baseURL = strings.TrimRight(url, "/")
+}
+
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
+func (c *Client) SetAPIKey(key string) {
+	c.apiKey = key
+}
+
+func (c *Client) APIKey() string {
+	return c.apiKey
+}
+
 type chatRequest struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	Stream      bool      `json:"stream"`
-	Temperature float64   `json:"temperature,omitempty"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
+	Model           string    `json:"model"`
+	Messages        []Message `json:"messages"`
+	Stream          bool      `json:"stream"`
+	Temperature     float64   `json:"temperature,omitempty"`
+	MaxTokens       int       `json:"max_tokens,omitempty"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
 }
 
 type chatChunk struct {
@@ -56,13 +73,14 @@ type chatChunk struct {
 	} `json:"usage"`
 }
 
-func (c *Client) SendStream(messages []Message, temperature float64, maxTokens int, onChunk func(string)) error {
+func (c *Client) SendStream(messages []Message, temperature float64, maxTokens int, reasoningEffort string, onChunk func(string)) error {
 	reqBody := chatRequest{
-		Model:       c.model,
-		Messages:    messages,
-		Stream:      true,
-		Temperature: temperature,
-		MaxTokens:   maxTokens,
+		Model:           c.model,
+		Messages:        messages,
+		Stream:          true,
+		Temperature:     temperature,
+		MaxTokens:       maxTokens,
+		ReasoningEffort: reasoningEffort,
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -119,12 +137,12 @@ func (c *Client) SendStream(messages []Message, temperature float64, maxTokens i
 // SendStreamChan wraps SendStream and returns channels for chunk-by-chunk consumption.
 // This is designed for use with bubbletea's Cmd pattern where each chunk triggers
 // a new Cmd to read the next one.
-func (c *Client) SendStreamChan(messages []Message, temperature float64, maxTokens int) (<-chan string, <-chan error) {
+func (c *Client) SendStreamChan(messages []Message, temperature float64, maxTokens int, reasoningEffort string) (<-chan string, <-chan error) {
 	chunks := make(chan string, 10)
 	errs := make(chan error, 1)
 	go func() {
 		defer close(chunks)
-		err := c.SendStream(messages, temperature, maxTokens, func(chunk string) {
+		err := c.SendStream(messages, temperature, maxTokens, reasoningEffort, func(chunk string) {
 			chunks <- chunk
 		})
 		if err != nil {
