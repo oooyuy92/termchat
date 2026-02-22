@@ -11,6 +11,7 @@ import (
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/storage"
+	"golang.org/x/term"
 )
 
 type uiMode int
@@ -104,6 +105,9 @@ type Model struct {
 }
 
 func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
+	if width <= 0 {
+		width = 80
+	}
 	s := styles.DarkStyleConfig
 	if theme == "light" {
 		s = styles.LightStyleConfig
@@ -119,7 +123,13 @@ func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
 }
 
 func NewModel(cfg config.Config, cfgPath string) (Model, error) {
-	renderer, err := buildRenderer(cfg.Settings.Theme, 80)
+	// Use actual terminal width so text wraps correctly from the first render.
+	// Fall back to 80 if the terminal size cannot be determined.
+	initialWidth := 80
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		initialWidth = w
+	}
+	renderer, err := buildRenderer(cfg.Settings.Theme, initialWidth)
 	if err != nil {
 		return Model{}, err
 	}

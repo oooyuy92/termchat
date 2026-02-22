@@ -15,7 +15,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.recreateRenderer(msg.Width)
+		if msg.Width > 0 {
+			m.recreateRenderer(msg.Width)
+		}
 		return m, nil
 
 	case tea.KeyMsg:
