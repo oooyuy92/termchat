@@ -21,6 +21,7 @@ type uiMode int
 const (
 	modeChat uiMode = iota
 	modeConfig
+	modeResume
 )
 
 // streamChunkMsg carries a token and optional thinking text from the streaming response.
@@ -72,6 +73,17 @@ type configEditor struct {
 	editErr string
 }
 
+type dateGroup struct {
+	date  string   // "YYYY-MM-DD"
+	convs []string // conversation names in this group (most recent first)
+}
+
+type resumePicker struct {
+	groups  []dateGroup
+	dateIdx int // index into groups (left/right navigation)
+	convIdx int // index within groups[dateIdx].convs (up/down navigation)
+}
+
 type streamControl struct {
 	cancel context.CancelFunc
 }
@@ -96,6 +108,7 @@ type Model struct {
 	// UI state
 	mode            uiMode
 	configEd        configEditor
+	resumePick      resumePicker
 	cfgPath         string
 	autoSaveName    string
 	input           string
