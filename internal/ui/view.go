@@ -6,10 +6,14 @@ import (
 	"strings"
 )
 
-// cleanGlamourOutput strips glamour's leading/trailing blank lines.
-// Document margin is already 0 at renderer creation, so no space stripping needed.
+// cleanGlamourOutput strips glamour's leading/trailing blank lines and
+// collapses inter-paragraph blank lines.
+// The glamour paragraph renderer hardcodes "\n" before each non-first paragraph
+// and "\n" after each paragraph, producing "\n\n" (a blank line) between them.
+// Code block blank lines have ANSI codes between newlines and are unaffected.
 func cleanGlamourOutput(s string) string {
 	s = strings.TrimLeft(s, "\n")
+	s = strings.ReplaceAll(s, "\n\n", "\n")
 	s = strings.TrimRight(s, " \n")
 	return s
 }
