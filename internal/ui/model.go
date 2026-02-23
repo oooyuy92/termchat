@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
+	"github.com/termchat/termchat/internal/shortcuts"
 	"github.com/termchat/termchat/internal/storage"
 	"golang.org/x/term"
 )
@@ -22,6 +24,7 @@ const (
 	modeChat uiMode = iota
 	modeConfig
 	modeResume
+	modeShortcuts
 )
 
 // streamChunkMsg carries a token and optional thinking text from the streaming response.
@@ -57,6 +60,9 @@ type configSavedMsg struct {
 // autoSavedMsg carries the result of a background auto-save (Err may be nil).
 type autoSavedMsg struct{ Err error }
 
+// shortcutsSavedMsg carries the result of saving shortcuts to disk.
+type shortcutsSavedMsg struct{ Err error }
+
 type configField struct {
 	Label   string
 	Key     string
@@ -74,7 +80,7 @@ type configEditor struct {
 }
 
 type dateGroup struct {
-	date  string         // "YYYY-MM-DD"
+	date  string             // "YYYY-MM-DD"
 	convs []storage.ConvInfo // conversations in this group (most recent first)
 }
 
@@ -82,6 +88,25 @@ type resumePicker struct {
 	groups  []dateGroup
 	dateIdx int // index into groups (left/right navigation)
 	convIdx int // index within groups[dateIdx].convs (up/down navigation)
+}
+
+// shortcutSubMode describes what the shortcut editor is currently doing.
+type shortcutSubMode int
+
+const (
+	shortcutModeList        shortcutSubMode = iota
+	shortcutModeEditName                    // editing the name field
+	shortcutModeEditContent                 // editing the content field
+)
+
+type shortcutEditor struct {
+	items        []shortcuts.Shortcut
+	cursor       int // index of selected item
+	subMode      shortcutSubMode
+	editBuf      string // current text being typed
+	savedName    string // name before edit started (for cancel)
+	savedContent string // content before edit started (for cancel)
+	isNew        bool   // true when 'n' added a new item
 }
 
 type streamControl struct {
@@ -109,6 +134,8 @@ type Model struct {
 	mode            uiMode
 	configEd        configEditor
 	resumePick      resumePicker
+	shortcutsPath   string
+	shortcutEd      shortcutEditor
 	cfgPath         string
 	autoSaveName    string
 	input           string
@@ -164,15 +191,18 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 		return Model{}, fmt.Errorf("open storage: %w", err)
 	}
 
+	shortcutsPath := filepath.Join(filepath.Dir(cfgPath), "shortcuts.yaml")
+
 	return Model{
-		cfg:          cfg,
-		client:       chat.NewClient(cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model),
-		history:      chat.NewHistory(),
-		store:        store,
-		renderer:     renderer,
-		cfgPath:      cfgPath,
-		theme:        ThemeByName(cfg.Settings.Theme),
-		autoSaveName: time.Now().Format("2006-01-02_150405"),
+		cfg:           cfg,
+		client:        chat.NewClient(cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model),
+		history:       chat.NewHistory(),
+		store:         store,
+		renderer:      renderer,
+		cfgPath:       cfgPath,
+		shortcutsPath: shortcutsPath,
+		theme:         ThemeByName(cfg.Settings.Theme),
+		autoSaveName:  time.Now().Format("2006-01-02_150405"),
 	}, nil
 }
 
