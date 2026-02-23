@@ -306,8 +306,8 @@ func TestGeminiClient_SendStream(t *testing.T) {
 		if r.Header.Get("Authorization") != "" {
 			t.Error("Gemini should not send Authorization header")
 		}
-		if r.URL.Query().Get("key") == "" {
-			t.Error("expected key query param")
+		if r.Header.Get("x-goog-api-key") == "" {
+			t.Error("expected x-goog-api-key header")
 		}
 		if r.URL.Query().Get("alt") != "sse" {
 			t.Errorf("expected alt=sse, got %q", r.URL.Query().Get("alt"))
