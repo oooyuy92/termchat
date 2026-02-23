@@ -20,9 +20,14 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH" && exit 1 ;;
 esac
 
-# Get latest release version via redirect (avoids GitHub API rate limits)
-VERSION=$(curl -Ls -o /dev/null -w "%{url_effective}" \
-  "https://github.com/${REPO}/releases/latest" | sed 's|.*/||')
+# Get latest release version (HEAD redirect → API fallback)
+VERSION=$(curl -sI "https://github.com/${REPO}/releases/latest" \
+  | grep -i "^location:" | sed 's|.*/tag/||' | tr -d '[:space:]')
+
+if [ -z "$VERSION" ]; then
+  VERSION=$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" \
+    | grep '"tag_name"' | cut -d'"' -f4)
+fi
 
 if [ -z "$VERSION" ]; then
   echo "Error: could not determine latest version" && exit 1
