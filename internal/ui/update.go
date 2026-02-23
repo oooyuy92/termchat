@@ -272,6 +272,8 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		} else {
 			m.autoSaveName = name
 			m.history.Clear()
+			m.history.SetSystemPrompt("")
+			m.activeRole = ""
 			for _, msg := range msgs {
 				m.history.Add(msg)
 			}

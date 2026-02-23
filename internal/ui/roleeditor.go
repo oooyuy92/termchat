@@ -79,6 +79,9 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case roleModeEditName:
 		switch msg.String() {
 		case "enter":
+			if strings.TrimSpace(ed.editBuf) == "" {
+				return m, nil
+			}
 			ed.items[ed.cursor].Name = ed.editBuf
 			ed.editBuf = ed.items[ed.cursor].Prompt
 			ed.subMode = roleModeEditPrompt

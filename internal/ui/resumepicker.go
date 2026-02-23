@@ -79,6 +79,8 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		m.autoSaveName = conv.Name
 		m.history.Clear()
+		m.history.SetSystemPrompt("")
+		m.activeRole = ""
 		for _, msg := range msgs {
 			m.history.Add(msg)
 		}
