@@ -74,6 +74,11 @@ func (ac *slashComplete) clampSlashAC() {
 }
 
 func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Reset confirmQuit on any key other than ctrl+c (same pattern as Update())
+	if msg.String() != "ctrl+c" {
+		m.confirmQuit = false
+	}
+
 	switch msg.String() {
 	case "esc":
 		m.input = ""
@@ -113,7 +118,10 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.input = ""
 			m.mode = modeChat
 			newModel, teaCmd := m.handleCommand(cmd)
-			return newModel.(Model), teaCmd
+			if updated, ok := newModel.(Model); ok {
+				return updated, teaCmd
+			}
+			return m, teaCmd
 		}
 		m.mode = modeChat
 		return m, nil
