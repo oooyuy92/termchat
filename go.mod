@@ -3,6 +3,7 @@ module github.com/termchat/termchat
 go 1.24.0
 
 require (
+	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
@@ -11,6 +12,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
+
+replace github.com/atotto/clipboard => /tmp/clipboard-stub
 
 require (
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
