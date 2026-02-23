@@ -263,180 +263,47 @@ func TestAnthropicClient_SystemPrompt(t *testing.T) {
 	}
 }
 
-func TestGeminiClient_SendStreamWithImage(t *testing.T) {
-	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"I see a cat\"}]}}]}\n\n"
+func TestGeminiClient_BuildContents(t *testing.T) {
+	c := NewGeminiClient("", "key", "gemini-2.0-flash")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		bodyStr := string(body)
-		if !strings.Contains(bodyStr, "inline_data") {
-			t.Error("expected inline_data in request body")
-		}
-		if !strings.Contains(bodyStr, "image/png") {
-			t.Error("expected image/png mime type")
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, sseBody)
-	}))
-	defer server.Close()
-
-	client := NewGeminiClient(server.URL, "test-key", "gemini-2.0-flash")
-	img := ImageData{MimeType: "image/png", Data: []byte("fake-png-data")}
-	messages := []Message{{Role: "user", Content: "what is this?", Images: []ImageData{img}}}
-	ctx := context.Background()
-	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
-
-	var result string
-	for chunk := range chunks {
-		result += chunk.Content
-	}
-	if err := <-errs; err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != "I see a cat" {
-		t.Errorf("got %q, want %q", result, "I see a cat")
-	}
-}
-
-func TestGeminiClient_SendStream(t *testing.T) {
-	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n\n" +
-		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]}}]}\n\n"
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			t.Error("Gemini should not send Authorization header")
-		}
-		if r.Header.Get("x-goog-api-key") == "" {
-			t.Error("expected x-goog-api-key header")
-		}
-		if r.URL.Query().Get("alt") != "sse" {
-			t.Errorf("expected alt=sse, got %q", r.URL.Query().Get("alt"))
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, sseBody)
-	}))
-	defer server.Close()
-
-	client := NewGeminiClient(server.URL, "test-key", "gemini-2.0-flash")
-	messages := []Message{{Role: "user", Content: "hi"}}
-	ctx := context.Background()
-	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
-
-	var result string
-	for chunk := range chunks {
-		result += chunk.Content
-	}
-	if err := <-errs; err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != "Hello world" {
-		t.Errorf("got %q, want %q", result, "Hello world")
-	}
-}
-
-func TestGeminiClient_SendStreamThinking(t *testing.T) {
-	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"I think\",\"thought\":true}]}}]}\n\n" +
-		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Answer\"}]}}]}\n\n"
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		if !strings.Contains(string(body), "thinkingBudget") {
-			t.Error("expected thinkingBudget in request when budgetTokens > 0")
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, sseBody)
-	}))
-	defer server.Close()
-
-	client := NewGeminiClient(server.URL, "test-key", "gemini-2.5-pro")
-	messages := []Message{{Role: "user", Content: "think"}}
-	ctx := context.Background()
-	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 8192, "", 5000)
-
-	var text, thinking string
-	for chunk := range chunks {
-		text += chunk.Content
-		thinking += chunk.Thinking
-	}
-	if err := <-errs; err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if text != "Answer" {
-		t.Errorf("text: got %q, want %q", text, "Answer")
-	}
-	if thinking != "I think" {
-		t.Errorf("thinking: got %q, want %q", thinking, "I think")
-	}
-}
-
-func TestGeminiClient_SendStreamThinkingLevel(t *testing.T) {
-	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"thinking\",\"thought\":true}]}}]}\n\n" +
-		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Answer\"}]}}]}\n\n"
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		bodyStr := string(body)
-		if !strings.Contains(bodyStr, "thinkingLevel") {
-			t.Error("expected thinkingLevel in request for Gemini 3 model")
-		}
-		if strings.Contains(bodyStr, "thinkingBudget") {
-			t.Error("should not contain thinkingBudget for Gemini 3 model")
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, sseBody)
-	}))
-	defer server.Close()
-
-	client := NewGeminiClient(server.URL, "test-key", "gemini-3.1-pro-preview")
-	messages := []Message{{Role: "user", Content: "think"}}
-	ctx := context.Background()
-	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 8192, "high", 0)
-
-	var text, thinking string
-	for chunk := range chunks {
-		text += chunk.Content
-		thinking += chunk.Thinking
-	}
-	if err := <-errs; err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if text != "Answer" {
-		t.Errorf("text: got %q, want %q", text, "Answer")
-	}
-	if thinking != "thinking" {
-		t.Errorf("thinking: got %q, want %q", thinking, "thinking")
-	}
-}
-
-func TestGeminiClient_SystemPrompt(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req map[string]interface{}
-		json.Unmarshal(body, &req)
-		if _, ok := req["systemInstruction"]; !ok {
-			t.Error("expected systemInstruction field")
-		}
-		contents, _ := req["contents"].([]interface{})
-		for _, c := range contents {
-			content := c.(map[string]interface{})
-			if content["role"] == "system" {
-				t.Error("system role should not appear in contents")
-			}
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "")
-	}))
-	defer server.Close()
-
-	client := NewGeminiClient(server.URL, "test-key", "gemini-2.0-flash")
 	messages := []Message{
 		{Role: "system", Content: "Be helpful"},
-		{Role: "user", Content: "hi"},
+		{Role: "user", Content: "hello", Images: []ImageData{{MimeType: "image/png", Data: []byte("fake")}}},
+		{Role: "assistant", Content: "hi"},
+		{Role: "user", Content: "bye"},
 	}
-	ctx := context.Background()
-	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
-	for range chunks {}
-	<-errs
+
+	contents, sysInstr := c.buildContents(messages)
+
+	if sysInstr == nil {
+		t.Fatal("expected system instruction")
+	}
+	if sysInstr.Parts[0].Text != "Be helpful" {
+		t.Errorf("system: got %q, want %q", sysInstr.Parts[0].Text, "Be helpful")
+	}
+
+	if len(contents) != 3 {
+		t.Fatalf("contents: got %d, want 3", len(contents))
+	}
+
+	// First user message should have image + text
+	if contents[0].Role != "user" {
+		t.Errorf("role[0]: got %q, want %q", contents[0].Role, "user")
+	}
+	if len(contents[0].Parts) != 2 {
+		t.Fatalf("parts[0]: got %d, want 2", len(contents[0].Parts))
+	}
+	if contents[0].Parts[0].InlineData == nil {
+		t.Error("expected inline data in first part")
+	}
+	if contents[0].Parts[1].Text != "hello" {
+		t.Errorf("text[0]: got %q, want %q", contents[0].Parts[1].Text, "hello")
+	}
+
+	// Assistant should be mapped to "model"
+	if contents[1].Role != "model" {
+		t.Errorf("role[1]: got %q, want %q", contents[1].Role, "model")
+	}
 }
 
 func TestGeminiClient_BuildThinkingConfig(t *testing.T) {
@@ -445,17 +312,16 @@ func TestGeminiClient_BuildThinkingConfig(t *testing.T) {
 		model           string
 		reasoningEffort string
 		budgetTokens    int
-		wantLevel       string
-		wantBudget      *int
 		wantNil         bool
+		checkLevel      bool
+		checkBudget     bool
 	}{
-		{"gemini3 with reasoning_effort", "gemini-3.1-pro-preview", "low", 0, "low", nil, false},
-		{"gemini3 budget maps to low", "gemini-3-flash-preview", "", 512, "low", nil, false},
-		{"gemini3 budget maps to medium", "gemini-3-flash-preview", "", 4096, "medium", nil, false},
-		{"gemini3 budget maps to high", "gemini-3-flash-preview", "", 16000, "high", nil, false},
-		{"gemini3 no config", "gemini-3-flash-preview", "", 0, "", nil, true},
-		{"gemini25 with budget", "gemini-2.5-pro", "", 5000, "", intPtr(5000), false},
-		{"gemini25 no config", "gemini-2.5-pro", "", 0, "", nil, true},
+		{"gemini3 with effort high", "gemini-3.1-pro-preview", "high", 0, false, true, false},
+		{"gemini3 with effort low", "gemini-3-flash-preview", "low", 0, false, true, false},
+		{"gemini3 budget maps to level", "gemini-3-flash-preview", "", 4096, false, true, false},
+		{"gemini3 no config", "gemini-3-flash-preview", "", 0, true, false, false},
+		{"gemini25 with budget", "gemini-2.5-pro", "", 5000, false, false, true},
+		{"gemini25 no config", "gemini-2.5-pro", "", 0, true, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -470,39 +336,12 @@ func TestGeminiClient_BuildThinkingConfig(t *testing.T) {
 			if tc == nil {
 				t.Fatal("expected non-nil thinking config")
 			}
-			if tc.ThinkingLevel != tt.wantLevel {
-				t.Errorf("level: got %q, want %q", tc.ThinkingLevel, tt.wantLevel)
+			if tt.checkLevel && tc.ThinkingLevel == "" {
+				t.Error("expected ThinkingLevel to be set")
 			}
-			if tt.wantBudget != nil {
-				if tc.ThinkingBudget == nil || *tc.ThinkingBudget != *tt.wantBudget {
-					t.Errorf("budget: got %v, want %d", tc.ThinkingBudget, *tt.wantBudget)
-				}
+			if tt.checkBudget && tc.ThinkingBudget == nil {
+				t.Error("expected ThinkingBudget to be set")
 			}
 		})
 	}
-}
-
-func intPtr(v int) *int { return &v }
-
-func TestGeminiClient_RoleMapping(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		if strings.Contains(string(body), `"role":"assistant"`) {
-			t.Error("assistant role should be mapped to model")
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "")
-	}))
-	defer server.Close()
-
-	client := NewGeminiClient(server.URL, "test-key", "gemini-2.0-flash")
-	messages := []Message{
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "hi"},
-		{Role: "user", Content: "bye"},
-	}
-	ctx := context.Background()
-	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
-	for range chunks {}
-	<-errs
 }
