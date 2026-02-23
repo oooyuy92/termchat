@@ -1,6 +1,6 @@
 # termchat
 
-A terminal chat interface for AI conversations. Supports OpenAI-compatible APIs.
+A terminal chat interface for AI conversations. Supports OpenAI-compatible APIs with streaming, Markdown rendering, and persistent conversation history.
 
 ## Purpose
 When I want to use a browser or a third-party AI chat client, my computer becomes very slow. In fact, AI chat does not require very many additional features; I just hope to establish a connection with the AI faster, so I wrote this project.
@@ -42,13 +42,51 @@ settings:
 
 ```bash
 termchat
-```
-
-Use a custom config:
-
-```bash
+# or with a custom config
 termchat --config /path/to/config.yaml
 ```
+
+## Features
+
+**Chat**
+- Streaming responses with real-time output
+- Markdown rendering with syntax-highlighted code blocks
+- Multi-line input (Enter to send, Shift+Enter for newline)
+- Status bar showing model name, token usage, and message count
+
+**Conversation management**
+- Auto-saves every conversation to SQLite after each response
+- `/resume` — browse and restore past conversations with a date-grouped picker
+- `/save [name]` — save current conversation under a custom name
+- `/load [name]` — load a saved conversation
+- `/list` — list all saved conversations
+- `/clear` — clear the current conversation
+
+**Customization**
+- `/settings` — edit model, API key, temperature, and other settings in-app
+- `/shortcuts` — customize keyboard shortcuts
+- Dark and light themes
+
+**Compatibility**
+- Works with any OpenAI-compatible API (OpenAI, Azure OpenAI, local models via Ollama, etc.)
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/resume` | Open conversation history picker |
+| `/save [name]` | Save current conversation |
+| `/load [name]` | Load a saved conversation |
+| `/list` | List all conversations |
+| `/clear` | Clear current conversation |
+| `/settings` | Open settings editor |
+| `/shortcuts` | Open shortcuts editor |
+
+## Roadmap
+
+- [ ] Roles — define system prompt presets and pick one at startup
+- [ ] Search across conversation history
+- [ ] Multiple simultaneous sessions
 
 ## Build from source
 
