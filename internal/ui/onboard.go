@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/termchat/termchat/internal/chat"
 )
 
 // updateOnboardMode handles key events in onboarding mode.
@@ -15,6 +16,7 @@ func (m Model) updateOnboardMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if msg.String() == "esc" && !m.configEd.editing {
 		m.mode = modeChat
 		m.statusMsg = "Ready! Type a message to start chatting."
+		m.client = chat.NewProvider(m.cfg.API.Provider, m.cfg.API.BaseURL, m.cfg.API.APIKey, m.cfg.API.Model)
 		return m, m.saveConfigCmd()
 	}
 
@@ -67,6 +69,17 @@ func (m Model) viewOnboard() string {
 				displayVal = maskValue(displayVal)
 			}
 			value = m.theme.ConfigValueStyle().Render(displayVal)
+			if len(field.Options) > 0 {
+				optStrs := make([]string, len(field.Options))
+				for j, opt := range field.Options {
+					if opt == "" {
+						optStrs[j] = "(not set)"
+					} else {
+						optStrs[j] = opt
+					}
+				}
+				value += "  [" + strings.Join(optStrs, " | ") + "]"
+			}
 		}
 
 		b.WriteString(cursor + label + value + "\n")
@@ -81,7 +94,7 @@ func (m Model) viewOnboard() string {
 	if ed.editing {
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: confirm  |  Esc: cancel"))
 	} else {
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: navigate  |  Enter: edit  |  Esc: skip and start chatting"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: navigate  |  Enter: edit/cycle  |  Esc: skip and start chatting"))
 	}
 	b.WriteString("\n")
 

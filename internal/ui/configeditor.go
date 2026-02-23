@@ -6,17 +6,21 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 )
 
 func buildConfigFields(cfg config.Config) []configField {
 	return []configField{
+		{Label: "Provider", Key: "provider", Value: cfg.API.Provider,
+			Options: []string{"openai", "openai-compatible", "anthropic", "gemini"}},
 		{Label: "API Base URL", Key: "base_url", Value: cfg.API.BaseURL},
 		{Label: "API Key", Key: "api_key", Value: cfg.API.APIKey, Masked: true},
 		{Label: "Model", Key: "model", Value: cfg.API.Model},
 		{Label: "Temperature", Key: "temperature", Value: fmt.Sprintf("%.2f", cfg.Parameters.Temperature)},
 		{Label: "Max Tokens", Key: "max_tokens", Value: strconv.Itoa(cfg.Parameters.MaxTokens)},
 		{Label: "Reasoning Effort", Key: "reasoning_effort", Value: cfg.Parameters.ReasoningEffort, Options: []string{"", "low", "medium", "high"}},
+		{Label: "Budget Tokens", Key: "budget_tokens", Value: strconv.Itoa(cfg.Parameters.BudgetTokens)},
 		{Label: "Theme", Key: "theme", Value: cfg.Settings.Theme, Options: []string{"dark", "light"}},
 	}
 }
@@ -24,6 +28,8 @@ func buildConfigFields(cfg config.Config) []configField {
 // buildOnboardFields returns the 3 API fields needed for first-run onboarding.
 func buildOnboardFields(cfg config.Config) []configField {
 	return []configField{
+		{Label: "Provider", Key: "provider", Value: cfg.API.Provider,
+			Options: []string{"openai", "openai-compatible", "anthropic", "gemini"}},
 		{Label: "API Base URL", Key: "base_url", Value: cfg.API.BaseURL},
 		{Label: "API Key", Key: "api_key", Value: cfg.API.APIKey, Masked: true},
 		{Label: "Model", Key: "model", Value: cfg.API.Model},
@@ -68,6 +74,11 @@ func validateField(key, value string) string {
 		if v != "" && v != "low" && v != "medium" && v != "high" {
 			return "must be low, medium, high, or empty"
 		}
+	case "budget_tokens":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			return "must be a non-negative integer"
+		}
 	case "theme":
 		v := strings.ToLower(strings.TrimSpace(value))
 		if v != "dark" && v != "light" {
@@ -79,6 +90,8 @@ func validateField(key, value string) string {
 
 func applyFieldToConfig(cfg *config.Config, key, value string) {
 	switch key {
+	case "provider":
+		cfg.API.Provider = value
 	case "base_url":
 		cfg.API.BaseURL = value
 	case "api_key":
@@ -93,6 +106,11 @@ func applyFieldToConfig(cfg *config.Config, key, value string) {
 		cfg.Parameters.MaxTokens = n
 	case "reasoning_effort":
 		cfg.Parameters.ReasoningEffort = strings.ToLower(strings.TrimSpace(value))
+	case "budget_tokens":
+		n, err := strconv.Atoi(value)
+		if err == nil && n >= 0 {
+			cfg.Parameters.BudgetTokens = n
+		}
 	case "theme":
 		cfg.Settings.Theme = strings.ToLower(strings.TrimSpace(value))
 	}
@@ -183,7 +201,23 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			idx = (idx + 1) % len(field.Options)
 			field.Value = field.Options[idx]
 			applyFieldToConfig(&m.cfg, field.Key, field.Value)
-			applyConfigToClient(m.client, m.cfg)
+			// When provider changes, auto-fill base_url and recreate the client
+			if field.Key == "provider" {
+				newURL := config.ProviderDefaultBaseURL(m.cfg.API.Provider)
+				if newURL != "" {
+					m.cfg.API.BaseURL = newURL
+					// Update base_url field in the editor
+					for i := range ed.fields {
+						if ed.fields[i].Key == "base_url" {
+							ed.fields[i].Value = newURL
+							break
+						}
+					}
+				}
+				m.client = chat.NewProvider(m.cfg.API.Provider, m.cfg.API.BaseURL, m.cfg.API.APIKey, m.cfg.API.Model)
+			} else {
+				applyConfigToClient(m.client, m.cfg)
+			}
 			m.theme = ThemeByName(m.cfg.Settings.Theme)
 			if field.Key == "theme" {
 				m.recreateRenderer(m.width)
