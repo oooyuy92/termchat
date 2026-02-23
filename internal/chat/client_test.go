@@ -263,6 +263,41 @@ func TestAnthropicClient_SystemPrompt(t *testing.T) {
 	}
 }
 
+func TestGeminiClient_SendStreamWithImage(t *testing.T) {
+	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"I see a cat\"}]}}]}\n\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyStr := string(body)
+		if !strings.Contains(bodyStr, "inline_data") {
+			t.Error("expected inline_data in request body")
+		}
+		if !strings.Contains(bodyStr, "image/png") {
+			t.Error("expected image/png mime type")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseBody)
+	}))
+	defer server.Close()
+
+	client := NewGeminiClient(server.URL, "test-key", "gemini-2.0-flash")
+	img := ImageData{MimeType: "image/png", Data: []byte("fake-png-data")}
+	messages := []Message{{Role: "user", Content: "what is this?", Images: []ImageData{img}}}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
+
+	var result string
+	for chunk := range chunks {
+		result += chunk.Content
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "I see a cat" {
+		t.Errorf("got %q, want %q", result, "I see a cat")
+	}
+}
+
 func TestGeminiClient_SendStream(t *testing.T) {
 	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n\n" +
 		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]}}]}\n\n"

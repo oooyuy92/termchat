@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,7 +46,13 @@ type geminiContent struct {
 }
 
 type geminiPart struct {
-	Text string `json:"text"`
+	Text       string        `json:"text,omitempty"`
+	InlineData *geminiInline `json:"inline_data,omitempty"`
+}
+
+type geminiInline struct {
+	MimeType string `json:"mime_type"`
+	Data     string `json:"data"`
 }
 
 type geminiRequest struct {
@@ -92,10 +99,19 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 		if role == "assistant" {
 			role = "model"
 		}
-		contents = append(contents, geminiContent{
-			Role:  role,
-			Parts: []geminiPart{{Text: m.Content}},
-		})
+		var parts []geminiPart
+		for _, img := range m.Images {
+			parts = append(parts, geminiPart{
+				InlineData: &geminiInline{
+					MimeType: img.MimeType,
+					Data:     base64.StdEncoding.EncodeToString(img.Data),
+				},
+			})
+		}
+		if m.Content != "" {
+			parts = append(parts, geminiPart{Text: m.Content})
+		}
+		contents = append(contents, geminiContent{Role: role, Parts: parts})
 	}
 
 	req := geminiRequest{
