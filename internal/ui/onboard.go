@@ -69,7 +69,7 @@ func (m Model) viewOnboard() string {
 			value = m.theme.ConfigValueStyle().Render(displayVal)
 		}
 
-		b.WriteString(cursor + label + " " + value + "\n")
+		b.WriteString(cursor + label + value + "\n")
 	}
 
 	b.WriteString("\n")
