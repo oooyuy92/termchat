@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -138,10 +140,10 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s",
+	endpoint := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s",
 		c.baseURL, c.model, c.apiKey)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("new request: %w", err)
 	}
@@ -149,7 +151,12 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("http: %w", err)
+		// Extract root cause from url.Error to avoid leaking API key
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return fmt.Errorf("connect: %v", urlErr.Err)
+		}
+		return fmt.Errorf("connect: %v", err)
 	}
 	defer resp.Body.Close()
 

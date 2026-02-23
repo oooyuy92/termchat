@@ -19,16 +19,21 @@ type Provider interface {
 	APIKey() string
 }
 
-// newHTTPClient returns an http.Client with a 30-second dial timeout.
-// No overall timeout is set because streaming responses can last a long time.
+// newHTTPClient returns an http.Client matching http.DefaultTransport
+// settings but with explicit timeouts to prevent indefinite hangs.
 func newHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
-				Timeout: 30 * time.Second,
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
 			}).DialContext,
-			TLSHandshakeTimeout: 15 * time.Second,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
 }
