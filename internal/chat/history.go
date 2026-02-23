@@ -43,3 +43,20 @@ func (h *History) ToAPIMessages() []Message {
 func (h *History) Count() int {
 	return len(h.messages)
 }
+
+// DeleteAt removes the message at index i. No-op if i is out of bounds.
+func (h *History) DeleteAt(i int) {
+	if i < 0 || i >= len(h.messages) {
+		return
+	}
+	h.messages = append(h.messages[:i], h.messages[i+1:]...)
+}
+
+// Truncate keeps only the first n messages, discarding the rest.
+// No-op if n >= len(messages).
+func (h *History) Truncate(n int) {
+	if n >= len(h.messages) {
+		return
+	}
+	h.messages = h.messages[:n]
+}

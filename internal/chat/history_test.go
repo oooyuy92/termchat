@@ -44,3 +44,56 @@ func TestHistory_ToAPIMessages(t *testing.T) {
 		t.Errorf("first message role = %q, want system", msgs[0].Role)
 	}
 }
+
+func TestHistory_DeleteAt(t *testing.T) {
+	h := NewHistory()
+	h.Add(Message{Role: "user", Content: "a"})
+	h.Add(Message{Role: "assistant", Content: "b"})
+	h.Add(Message{Role: "user", Content: "c"})
+
+	h.DeleteAt(1) // remove "b"
+
+	msgs := h.Messages()
+	if len(msgs) != 2 {
+		t.Fatalf("len = %d, want 2", len(msgs))
+	}
+	if msgs[0].Content != "a" || msgs[1].Content != "c" {
+		t.Errorf("got %v, want [a c]", msgs)
+	}
+}
+
+func TestHistory_DeleteAt_OutOfBounds(t *testing.T) {
+	h := NewHistory()
+	h.Add(Message{Role: "user", Content: "a"})
+	h.DeleteAt(-1)  // no-op
+	h.DeleteAt(5)   // no-op
+	if len(h.Messages()) != 1 {
+		t.Errorf("len = %d, want 1 (out-of-bounds delete should be no-op)", len(h.Messages()))
+	}
+}
+
+func TestHistory_Truncate(t *testing.T) {
+	h := NewHistory()
+	h.Add(Message{Role: "user", Content: "a"})
+	h.Add(Message{Role: "assistant", Content: "b"})
+	h.Add(Message{Role: "user", Content: "c"})
+
+	h.Truncate(2) // keep first 2
+
+	msgs := h.Messages()
+	if len(msgs) != 2 {
+		t.Fatalf("len = %d, want 2", len(msgs))
+	}
+	if msgs[0].Content != "a" || msgs[1].Content != "b" {
+		t.Errorf("got %v, want [a b]", msgs)
+	}
+}
+
+func TestHistory_Truncate_Noop(t *testing.T) {
+	h := NewHistory()
+	h.Add(Message{Role: "user", Content: "a"})
+	h.Truncate(5) // n > len → no-op
+	if len(h.Messages()) != 1 {
+		t.Errorf("len = %d, want 1", len(h.Messages()))
+	}
+}
