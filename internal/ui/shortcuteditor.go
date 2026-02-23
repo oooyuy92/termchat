@@ -119,8 +119,15 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			ed.subMode = shortcutModeList
 			return m, m.saveShortcutsCmd()
 		case "esc":
-			ed.items[ed.cursor].Name = ed.savedName
-			ed.items[ed.cursor].Content = ed.savedContent
+			if ed.isNew {
+				ed.items = ed.items[:len(ed.items)-1]
+				if ed.cursor >= len(ed.items) && ed.cursor > 0 {
+					ed.cursor--
+				}
+			} else {
+				ed.items[ed.cursor].Name = ed.savedName
+				ed.items[ed.cursor].Content = ed.savedContent
+			}
 			ed.subMode = shortcutModeList
 		case "backspace":
 			runes := []rune(ed.editBuf)

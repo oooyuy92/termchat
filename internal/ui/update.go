@@ -148,6 +148,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case shortcutsSavedMsg:
 		if msg.Err != nil {
 			m.statusMsg = "Shortcuts save failed: " + msg.Err.Error()
+		} else {
+			m.statusMsg = "Shortcuts saved"
 		}
 		return m, nil
 	}
