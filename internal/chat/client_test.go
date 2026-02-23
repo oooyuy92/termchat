@@ -262,3 +262,128 @@ func TestAnthropicClient_SystemPrompt(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestGeminiClient_SendStream(t *testing.T) {
+	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n\n" +
+		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]}}]}\n\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("Gemini should not send Authorization header")
+		}
+		if r.URL.Query().Get("key") == "" {
+			t.Error("expected key query param")
+		}
+		if r.URL.Query().Get("alt") != "sse" {
+			t.Errorf("expected alt=sse, got %q", r.URL.Query().Get("alt"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseBody)
+	}))
+	defer server.Close()
+
+	client := NewGeminiClient(server.URL, "test-key", "gemini-2.0-flash")
+	messages := []Message{{Role: "user", Content: "hi"}}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
+
+	var result string
+	for chunk := range chunks {
+		result += chunk.Content
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Hello world" {
+		t.Errorf("got %q, want %q", result, "Hello world")
+	}
+}
+
+func TestGeminiClient_SendStreamThinking(t *testing.T) {
+	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"I think\",\"thought\":true}]}}]}\n\n" +
+		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Answer\"}]}}]}\n\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "thinkingBudget") {
+			t.Error("expected thinkingBudget in request when budgetTokens > 0")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseBody)
+	}))
+	defer server.Close()
+
+	client := NewGeminiClient(server.URL, "test-key", "gemini-2.5-pro")
+	messages := []Message{{Role: "user", Content: "think"}}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 8192, "", 5000)
+
+	var text, thinking string
+	for chunk := range chunks {
+		text += chunk.Content
+		thinking += chunk.Thinking
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != "Answer" {
+		t.Errorf("text: got %q, want %q", text, "Answer")
+	}
+	if thinking != "I think" {
+		t.Errorf("thinking: got %q, want %q", thinking, "I think")
+	}
+}
+
+func TestGeminiClient_SystemPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req map[string]interface{}
+		json.Unmarshal(body, &req)
+		if _, ok := req["systemInstruction"]; !ok {
+			t.Error("expected systemInstruction field")
+		}
+		contents, _ := req["contents"].([]interface{})
+		for _, c := range contents {
+			content := c.(map[string]interface{})
+			if content["role"] == "system" {
+				t.Error("system role should not appear in contents")
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "")
+	}))
+	defer server.Close()
+
+	client := NewGeminiClient(server.URL, "test-key", "gemini-2.0-flash")
+	messages := []Message{
+		{Role: "system", Content: "Be helpful"},
+		{Role: "user", Content: "hi"},
+	}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
+	for range chunks {}
+	<-errs
+}
+
+func TestGeminiClient_RoleMapping(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"role":"assistant"`) {
+			t.Error("assistant role should be mapped to model")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "")
+	}))
+	defer server.Close()
+
+	client := NewGeminiClient(server.URL, "test-key", "gemini-2.0-flash")
+	messages := []Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+		{Role: "user", Content: "bye"},
+	}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
+	for range chunks {}
+	<-errs
+}

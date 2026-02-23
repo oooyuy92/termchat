@@ -148,7 +148,7 @@ type streamControl struct {
 
 type Model struct {
 	cfg      config.Config
-	client   *chat.OpenAIClient
+	client   chat.Provider
 	history  *chat.History
 	store    *storage.Store
 	renderer *glamour.TermRenderer
@@ -208,7 +208,7 @@ func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
 	)
 }
 
-func NewModel(cfg config.Config, cfgPath string, onboarding bool) (Model, error) {
+func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Provider) (Model, error) {
 	// Use actual terminal width so text wraps correctly from the first render.
 	// Fall back to 80 if the terminal size cannot be determined.
 	initialWidth := 80
@@ -257,7 +257,7 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool) (Model, error)
 
 	return Model{
 		cfg:           cfg,
-		client:        chat.NewOpenAIClient(cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model),
+		client:        client,
 		history:       chat.NewHistory(),
 		store:         store,
 		renderer:      renderer,

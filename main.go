@@ -6,6 +6,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/ui"
 )
@@ -24,7 +25,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	model, err := ui.NewModel(cfg, configPath, onboarding)
+	client := chat.NewProvider(cfg.API.Provider, cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model)
+
+	model, err := ui.NewModel(cfg, configPath, onboarding, client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize: %v\n", err)
 		os.Exit(1)

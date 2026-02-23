@@ -224,9 +224,10 @@ func (m Model) sendStreamCmd(ctx context.Context) tea.Cmd {
 	temp := m.cfg.Parameters.Temperature
 	maxTok := m.cfg.Parameters.MaxTokens
 	reasoningEffort := m.cfg.Parameters.ReasoningEffort
+	budgetTokens := m.cfg.Parameters.BudgetTokens
 
 	return func() tea.Msg {
-		chunks, errs := client.SendStreamChan(ctx, messages, temp, maxTok, reasoningEffort, 0)
+		chunks, errs := client.SendStreamChan(ctx, messages, temp, maxTok, reasoningEffort, budgetTokens)
 		return streamStartMsg{chunks: chunks, errs: errs}
 	}
 }
