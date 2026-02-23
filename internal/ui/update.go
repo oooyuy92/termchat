@@ -226,7 +226,7 @@ func (m Model) sendStreamCmd(ctx context.Context) tea.Cmd {
 	reasoningEffort := m.cfg.Parameters.ReasoningEffort
 
 	return func() tea.Msg {
-		chunks, errs := client.SendStreamChan(ctx, messages, temp, maxTok, reasoningEffort)
+		chunks, errs := client.SendStreamChan(ctx, messages, temp, maxTok, reasoningEffort, 0)
 		return streamStartMsg{chunks: chunks, errs: errs}
 	}
 }

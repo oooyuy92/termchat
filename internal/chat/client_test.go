@@ -40,7 +40,7 @@ func TestClient_SendStream(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key", "test-model")
+	client := NewOpenAIClient(server.URL, "test-key", "test-model")
 
 	messages := []Message{{Role: "user", Content: "hi"}}
 	var collected strings.Builder
@@ -82,7 +82,7 @@ func TestClient_SendStreamThinking(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key", "test-model")
+	client := NewOpenAIClient(server.URL, "test-key", "test-model")
 	messages := []Message{{Role: "user", Content: "hi"}}
 
 	var contentBuf, thinkingBuf strings.Builder
@@ -127,7 +127,7 @@ func TestClient_SendStreamGeminiThought(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key", "test-model")
+	client := NewOpenAIClient(server.URL, "test-key", "test-model")
 	messages := []Message{{Role: "user", Content: "hi"}}
 
 	var contentBuf, thinkingBuf strings.Builder

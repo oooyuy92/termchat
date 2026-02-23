@@ -1,4 +1,4 @@
-// internal/chat/client.go
+// internal/chat/client_openai.go
 package chat
 
 import (
@@ -17,15 +17,15 @@ type StreamChunk struct {
 	Thinking string
 }
 
-type Client struct {
+type OpenAIClient struct {
 	baseURL string
 	apiKey  string
 	model   string
 	http    *http.Client
 }
 
-func NewClient(baseURL, apiKey, model string) *Client {
-	return &Client{
+func NewOpenAIClient(baseURL, apiKey, model string) *OpenAIClient {
+	return &OpenAIClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 		model:   model,
@@ -33,27 +33,27 @@ func NewClient(baseURL, apiKey, model string) *Client {
 	}
 }
 
-func (c *Client) SetModel(model string) {
+func (c *OpenAIClient) SetModel(model string) {
 	c.model = model
 }
 
-func (c *Client) Model() string {
+func (c *OpenAIClient) Model() string {
 	return c.model
 }
 
-func (c *Client) SetBaseURL(url string) {
+func (c *OpenAIClient) SetBaseURL(url string) {
 	c.baseURL = strings.TrimRight(url, "/")
 }
 
-func (c *Client) BaseURL() string {
+func (c *OpenAIClient) BaseURL() string {
 	return c.baseURL
 }
 
-func (c *Client) SetAPIKey(key string) {
+func (c *OpenAIClient) SetAPIKey(key string) {
 	c.apiKey = key
 }
 
-func (c *Client) APIKey() string {
+func (c *OpenAIClient) APIKey() string {
 	return c.apiKey
 }
 
@@ -83,7 +83,7 @@ type chatChunk struct {
 	} `json:"usage"`
 }
 
-func (c *Client) SendStream(ctx context.Context, messages []Message, temperature float64, maxTokens int, reasoningEffort string, onChunk func(content, thinking string)) error {
+func (c *OpenAIClient) SendStream(ctx context.Context, messages []Message, temperature float64, maxTokens int, reasoningEffort string, onChunk func(content, thinking string)) error {
 	reqBody := chatRequest{
 		Model:           c.model,
 		Messages:        messages,
@@ -164,7 +164,7 @@ func (c *Client) SendStream(ctx context.Context, messages []Message, temperature
 // SendStreamChan wraps SendStream and returns a channel for chunk-by-chunk consumption.
 // This is designed for use with bubbletea's Cmd pattern where each chunk triggers
 // a new Cmd to read the next one.
-func (c *Client) SendStreamChan(ctx context.Context, messages []Message, temperature float64, maxTokens int, reasoningEffort string) (<-chan StreamChunk, <-chan error) {
+func (c *OpenAIClient) SendStreamChan(ctx context.Context, messages []Message, temperature float64, maxTokens int, reasoningEffort string, budgetTokens int) (<-chan StreamChunk, <-chan error) {
 	chunks := make(chan StreamChunk, 10)
 	errs := make(chan error, 1)
 	go func() {

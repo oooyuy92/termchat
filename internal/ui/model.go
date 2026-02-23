@@ -148,7 +148,7 @@ type streamControl struct {
 
 type Model struct {
 	cfg      config.Config
-	client   *chat.Client
+	client   *chat.OpenAIClient
 	history  *chat.History
 	store    *storage.Store
 	renderer *glamour.TermRenderer
@@ -257,7 +257,7 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool) (Model, error)
 
 	return Model{
 		cfg:           cfg,
-		client:        chat.NewClient(cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model),
+		client:        chat.NewOpenAIClient(cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model),
 		history:       chat.NewHistory(),
 		store:         store,
 		renderer:      renderer,
