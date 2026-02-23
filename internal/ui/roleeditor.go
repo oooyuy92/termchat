@@ -196,7 +196,9 @@ func (m Model) viewRolesEditor() string {
 			}
 			name := m.theme.ConfigValueStyle().Render(role.Name)
 			if role.Prompt != "" {
-				preview := m.theme.ConfigHelpStyle().Render("  " + truncate(role.Prompt, 40))
+				// Replace newlines with spaces for single-line preview in list
+				flat := strings.ReplaceAll(strings.ReplaceAll(role.Prompt, "\n", " "), "  ", " ")
+				preview := m.theme.ConfigHelpStyle().Render("  " + truncate(flat, 40))
 				b.WriteString(cursor + name + preview + "\n")
 			} else {
 				hint := m.theme.ConfigHelpStyle().Render("  (无系统提示)")
@@ -217,7 +219,8 @@ func (m Model) viewRolesEditor() string {
 		b.WriteString("\n\n")
 		role := ed.items[ed.cursor]
 		b.WriteString(m.theme.ConfigLabelStyle().Render("  名称:   ") + m.theme.ConfigEditStyle().Render(ed.editBuf+"\u2588") + "\n")
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词: ") + m.theme.ConfigValueStyle().Render(truncate(role.Prompt, 60)) + "\n")
+		flatPrompt := strings.ReplaceAll(strings.ReplaceAll(role.Prompt, "\n", " "), "  ", " ")
+		b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词: ") + m.theme.ConfigValueStyle().Render(truncate(flatPrompt, 60)) + "\n")
 		b.WriteString("\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: next field  |  Esc: cancel"))
 		b.WriteString("\n")

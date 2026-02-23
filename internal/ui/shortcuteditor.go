@@ -186,7 +186,8 @@ func (m Model) viewShortcutsEditor() string {
 				cursor = m.theme.ConfigCursorStyle().Render("> ")
 			}
 			name := m.theme.ConfigValueStyle().Render(sc.Name)
-			preview := m.theme.ConfigHelpStyle().Render("  " + truncate(sc.Content, 40))
+			flat := strings.ReplaceAll(strings.ReplaceAll(sc.Content, "\n", " "), "  ", " ")
+			preview := m.theme.ConfigHelpStyle().Render("  " + truncate(flat, 40))
 			b.WriteString(cursor + name + preview + "\n")
 		}
 
@@ -203,7 +204,8 @@ func (m Model) viewShortcutsEditor() string {
 		b.WriteString("\n\n")
 		sc := ed.items[ed.cursor]
 		b.WriteString(m.theme.ConfigLabelStyle().Render("  Name:    ") + m.theme.ConfigEditStyle().Render(ed.editBuf+"\u2588") + "\n")
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  Content: ") + m.theme.ConfigValueStyle().Render(truncate(sc.Content, 60)) + "\n")
+		flatContent := strings.ReplaceAll(strings.ReplaceAll(sc.Content, "\n", " "), "  ", " ")
+		b.WriteString(m.theme.ConfigLabelStyle().Render("  Content: ") + m.theme.ConfigValueStyle().Render(truncate(flatContent, 60)) + "\n")
 		b.WriteString("\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: next field  |  Esc: cancel"))
 		b.WriteString("\n")
