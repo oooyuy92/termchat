@@ -38,6 +38,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeRoles {
 			return m.updateRolesMode(msg)
 		}
+		if m.mode == modeOnboard {
+			return m.updateOnboardMode(msg)
+		}
 
 		if m.streaming {
 			if msg.String() == "ctrl+c" {

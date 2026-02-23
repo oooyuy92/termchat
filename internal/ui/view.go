@@ -45,6 +45,9 @@ func (m Model) View() string {
 	if m.mode == modeRoles {
 		return m.viewRolesEditor()
 	}
+	if m.mode == modeOnboard {
+		return m.viewOnboard()
+	}
 
 	var b strings.Builder
 

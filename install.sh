@@ -48,7 +48,4 @@ fi
 echo ""
 echo "termchat installed to ${INSTALL_DIR}/${BINARY}"
 echo ""
-echo "Next steps:"
-echo "  1. Create config: mkdir -p ~/.config/termchat"
-echo "  2. Add your API key to ~/.config/termchat/config.yaml"
-echo "  3. Run: termchat"
+echo "Run 'termchat' to get started — it will guide you through setup."
