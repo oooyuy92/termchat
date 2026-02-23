@@ -68,7 +68,8 @@ type geminiGenConfig struct {
 }
 
 type geminiThinkConfig struct {
-	ThinkingBudget int `json:"thinkingBudget"`
+	ThinkingBudget *int   `json:"thinkingBudget,omitempty"`
+	ThinkingLevel  string `json:"thinkingLevel,omitempty"`
 }
 
 func (c *GeminiClient) SendStreamChan(ctx context.Context, messages []Message, temp float64, maxTokens int, reasoningEffort string, budgetTokens int) (<-chan StreamChunk, <-chan error) {
@@ -79,7 +80,7 @@ func (c *GeminiClient) SendStreamChan(ctx context.Context, messages []Message, t
 		defer close(chunks)
 		defer close(errs)
 
-		if err := c.stream(ctx, messages, temp, maxTokens, budgetTokens, chunks); err != nil {
+		if err := c.stream(ctx, messages, temp, maxTokens, reasoningEffort, budgetTokens, chunks); err != nil {
 			errs <- err
 		}
 	}()
@@ -87,7 +88,7 @@ func (c *GeminiClient) SendStreamChan(ctx context.Context, messages []Message, t
 	return chunks, errs
 }
 
-func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp float64, maxTokens int, budgetTokens int, chunks chan<- StreamChunk) error {
+func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp float64, maxTokens int, reasoningEffort string, budgetTokens int, chunks chan<- StreamChunk) error {
 	var systemText string
 	var contents []geminiContent
 	for _, m := range messages {
@@ -128,8 +129,8 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 		}
 	}
 
-	if budgetTokens > 0 {
-		req.GenerationConfig.ThinkingConfig = &geminiThinkConfig{ThinkingBudget: budgetTokens}
+	if tc := c.buildThinkingConfig(reasoningEffort, budgetTokens); tc != nil {
+		req.GenerationConfig.ThinkingConfig = tc
 	}
 
 	body, err := json.Marshal(req)
@@ -158,6 +159,41 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 	}
 
 	return c.parseSSE(resp.Body, chunks)
+}
+
+// isGemini3 returns true if the model is a Gemini 3.x model that uses
+// thinkingLevel instead of thinkingBudget.
+func isGemini3(model string) bool {
+	return strings.Contains(model, "gemini-3")
+}
+
+// buildThinkingConfig returns the appropriate thinking config for the model.
+// Gemini 3.x uses thinkingLevel (low/medium/high); Gemini 2.5 uses thinkingBudget.
+func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens int) *geminiThinkConfig {
+	if isGemini3(c.model) {
+		level := reasoningEffort // "low", "medium", "high" map directly
+		if level == "" && budgetTokens > 0 {
+			// Map budget_tokens to a thinkingLevel for Gemini 3
+			switch {
+			case budgetTokens <= 1024:
+				level = "low"
+			case budgetTokens <= 8192:
+				level = "medium"
+			default:
+				level = "high"
+			}
+		}
+		if level == "" {
+			return nil
+		}
+		return &geminiThinkConfig{ThinkingLevel: level}
+	}
+
+	// Gemini 2.5: use thinkingBudget
+	if budgetTokens > 0 {
+		return &geminiThinkConfig{ThinkingBudget: &budgetTokens}
+	}
+	return nil
 }
 
 func (c *GeminiClient) parseSSE(r io.Reader, chunks chan<- StreamChunk) error {

@@ -369,6 +369,45 @@ func TestGeminiClient_SendStreamThinking(t *testing.T) {
 	}
 }
 
+func TestGeminiClient_SendStreamThinkingLevel(t *testing.T) {
+	sseBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"thinking\",\"thought\":true}]}}]}\n\n" +
+		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Answer\"}]}}]}\n\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyStr := string(body)
+		if !strings.Contains(bodyStr, "thinkingLevel") {
+			t.Error("expected thinkingLevel in request for Gemini 3 model")
+		}
+		if strings.Contains(bodyStr, "thinkingBudget") {
+			t.Error("should not contain thinkingBudget for Gemini 3 model")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseBody)
+	}))
+	defer server.Close()
+
+	client := NewGeminiClient(server.URL, "test-key", "gemini-3.1-pro-preview")
+	messages := []Message{{Role: "user", Content: "think"}}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 8192, "high", 0)
+
+	var text, thinking string
+	for chunk := range chunks {
+		text += chunk.Content
+		thinking += chunk.Thinking
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != "Answer" {
+		t.Errorf("text: got %q, want %q", text, "Answer")
+	}
+	if thinking != "thinking" {
+		t.Errorf("thinking: got %q, want %q", thinking, "thinking")
+	}
+}
+
 func TestGeminiClient_SystemPrompt(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -399,6 +438,51 @@ func TestGeminiClient_SystemPrompt(t *testing.T) {
 	for range chunks {}
 	<-errs
 }
+
+func TestGeminiClient_BuildThinkingConfig(t *testing.T) {
+	tests := []struct {
+		name            string
+		model           string
+		reasoningEffort string
+		budgetTokens    int
+		wantLevel       string
+		wantBudget      *int
+		wantNil         bool
+	}{
+		{"gemini3 with reasoning_effort", "gemini-3.1-pro-preview", "low", 0, "low", nil, false},
+		{"gemini3 budget maps to low", "gemini-3-flash-preview", "", 512, "low", nil, false},
+		{"gemini3 budget maps to medium", "gemini-3-flash-preview", "", 4096, "medium", nil, false},
+		{"gemini3 budget maps to high", "gemini-3-flash-preview", "", 16000, "high", nil, false},
+		{"gemini3 no config", "gemini-3-flash-preview", "", 0, "", nil, true},
+		{"gemini25 with budget", "gemini-2.5-pro", "", 5000, "", intPtr(5000), false},
+		{"gemini25 no config", "gemini-2.5-pro", "", 0, "", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewGeminiClient("", "key", tt.model)
+			tc := c.buildThinkingConfig(tt.reasoningEffort, tt.budgetTokens)
+			if tt.wantNil {
+				if tc != nil {
+					t.Errorf("expected nil, got %+v", tc)
+				}
+				return
+			}
+			if tc == nil {
+				t.Fatal("expected non-nil thinking config")
+			}
+			if tc.ThinkingLevel != tt.wantLevel {
+				t.Errorf("level: got %q, want %q", tc.ThinkingLevel, tt.wantLevel)
+			}
+			if tt.wantBudget != nil {
+				if tc.ThinkingBudget == nil || *tc.ThinkingBudget != *tt.wantBudget {
+					t.Errorf("budget: got %v, want %d", tc.ThinkingBudget, *tt.wantBudget)
+				}
+			}
+		})
+	}
+}
+
+func intPtr(v int) *int { return &v }
 
 func TestGeminiClient_RoleMapping(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
