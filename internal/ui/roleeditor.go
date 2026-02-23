@@ -2,11 +2,26 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/termchat/termchat/internal/roles"
 )
+
+// editScrollMax returns the maximum scrollTop so the last line is visible.
+func editScrollMax(text string, height, overhead int) int {
+	lines := strings.Split(text, "\n")
+	available := height - overhead
+	if available < 3 {
+		available = 3
+	}
+	max := len(lines) - available
+	if max < 0 {
+		max = 0
+	}
+	return max
+}
 
 func (m Model) saveRolesCmd() tea.Cmd {
 	items := make([]roles.Role, len(m.roleEd.items))
@@ -45,6 +60,7 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			ed.savedPrompt = ed.items[ed.cursor].Prompt
 			ed.editBuf = ed.items[ed.cursor].Name
 			ed.isNew = false
+			ed.scrollTop = 0
 			ed.subMode = roleModeEditName
 		case "n":
 			newItems := make([]roles.Role, len(ed.items)+1)
@@ -55,6 +71,7 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			ed.savedPrompt = ""
 			ed.editBuf = ""
 			ed.isNew = true
+			ed.scrollTop = 0
 			ed.subMode = roleModeEditName
 		case "d":
 			if len(ed.items) == 0 {
@@ -84,6 +101,8 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			ed.items[ed.cursor].Name = ed.editBuf
 			ed.editBuf = ed.items[ed.cursor].Prompt
+			// Start at bottom so cursor (end of text) is visible
+			ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 			ed.subMode = roleModeEditPrompt
 		case "esc":
 			if ed.isNew {
@@ -113,8 +132,18 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			ed.items[ed.cursor].Prompt = ed.editBuf
 			ed.subMode = roleModeList
 			return m, m.saveRolesCmd()
+		case "up", "k":
+			if ed.scrollTop > 0 {
+				ed.scrollTop--
+			}
+		case "down", "j":
+			max := editScrollMax(ed.editBuf, m.height, 7)
+			if ed.scrollTop < max {
+				ed.scrollTop++
+			}
 		case "enter":
 			ed.editBuf += "\n"
+			ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 		case "esc":
 			if ed.isNew {
 				ed.items = ed.items[:len(ed.items)-1]
@@ -130,10 +159,12 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			runes := []rune(ed.editBuf)
 			if len(runes) > 0 {
 				ed.editBuf = string(runes[:len(runes)-1])
+				ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 			}
 		default:
 			if msg.Type == tea.KeyRunes {
 				ed.editBuf += string(msg.Runes)
+				ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 			}
 		}
 	}
@@ -199,13 +230,54 @@ func (m Model) viewRolesEditor() string {
 		b.WriteString(m.theme.ConfigTitleStyle().Render("角色 — 编辑提示词"))
 		b.WriteString("\n\n")
 		role := ed.items[ed.cursor]
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  名称:   ") + m.theme.ConfigValueStyle().Render(role.Name) + "\n")
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词:\n"))
-		for _, line := range strings.Split(ed.editBuf+"\u2588", "\n") {
-			b.WriteString(m.theme.ConfigEditStyle().Render("  "+line) + "\n")
+		b.WriteString(m.theme.ConfigLabelStyle().Render("  名称: ") + m.theme.ConfigValueStyle().Render(role.Name) + "\n")
+
+		// Windowed scrollable content display
+		// overhead: title(1)+blank(1)+name(1)+label(1)+blank(1)+help(1)+status(1) = 7
+		const overhead = 7
+		available := m.height - overhead
+		if available < 3 {
+			available = 3
 		}
+
+		allLines := strings.Split(ed.editBuf, "\n")
+		totalLines := len(allLines)
+
+		// Clamp scrollTop
+		scrollTop := ed.scrollTop
+		maxScroll := totalLines - available
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if scrollTop > maxScroll {
+			scrollTop = maxScroll
+		}
+		if scrollTop < 0 {
+			scrollTop = 0
+		}
+		endLine := scrollTop + available
+		if endLine > totalLines {
+			endLine = totalLines
+		}
+
+		if totalLines > available {
+			label := fmt.Sprintf("  提示词 (%d–%d / %d 行, ↑↓ 滚动):", scrollTop+1, endLine, totalLines)
+			b.WriteString(m.theme.ConfigLabelStyle().Render(label) + "\n")
+		} else {
+			b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词:") + "\n")
+		}
+
+		cursorLine := totalLines - 1
+		for i, line := range allLines[scrollTop:endLine] {
+			display := line
+			if scrollTop+i == cursorLine {
+				display += "\u2588"
+			}
+			b.WriteString(m.theme.ConfigEditStyle().Render("  "+display) + "\n")
+		}
+
 		b.WriteString("\n")
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: newline  |  Ctrl+S: save  |  Esc: cancel"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: 换行  |  Ctrl+S: 保存  |  ↑↓: 滚动  |  Esc: 取消"))
 		b.WriteString("\n")
 	}
 

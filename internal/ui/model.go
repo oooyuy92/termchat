@@ -116,6 +116,7 @@ type shortcutEditor struct {
 	savedName    string // name before edit started (for cancel)
 	savedContent string // content before edit started (for cancel)
 	isNew        bool   // true when 'n' added a new item
+	scrollTop    int    // first visible line in content edit mode
 }
 
 // roleSubMode describes what the role editor is currently doing.
@@ -135,6 +136,7 @@ type roleEditor struct {
 	savedName   string
 	savedPrompt string
 	isNew       bool
+	scrollTop   int // first visible line in prompt edit mode
 }
 
 type rolePicker struct {

@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -53,6 +54,7 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			ed.savedContent = ed.items[ed.cursor].Content
 			ed.editBuf = ed.items[ed.cursor].Name
 			ed.isNew = false
+			ed.scrollTop = 0
 			ed.subMode = shortcutModeEditName
 		case "n":
 			newItems := make([]shortcuts.Shortcut, len(ed.items)+1)
@@ -63,6 +65,7 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			ed.savedContent = ""
 			ed.editBuf = ""
 			ed.isNew = true
+			ed.scrollTop = 0
 			ed.subMode = shortcutModeEditName
 		case "d":
 			if len(ed.items) == 0 {
@@ -89,6 +92,8 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case "enter":
 			ed.items[ed.cursor].Name = ed.editBuf
 			ed.editBuf = ed.items[ed.cursor].Content
+			// Start at bottom so cursor is visible
+			ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 			ed.subMode = shortcutModeEditContent
 		case "esc":
 			if ed.isNew {
@@ -114,10 +119,22 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case shortcutModeEditContent:
 		switch msg.String() {
-		case "enter":
+		case "ctrl+s":
 			ed.items[ed.cursor].Content = ed.editBuf
 			ed.subMode = shortcutModeList
 			return m, m.saveShortcutsCmd()
+		case "up", "k":
+			if ed.scrollTop > 0 {
+				ed.scrollTop--
+			}
+		case "down", "j":
+			max := editScrollMax(ed.editBuf, m.height, 7)
+			if ed.scrollTop < max {
+				ed.scrollTop++
+			}
+		case "enter":
+			ed.editBuf += "\n"
+			ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 		case "esc":
 			if ed.isNew {
 				ed.items = ed.items[:len(ed.items)-1]
@@ -133,10 +150,12 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			runes := []rune(ed.editBuf)
 			if len(runes) > 0 {
 				ed.editBuf = string(runes[:len(runes)-1])
+				ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 			}
 		default:
 			if msg.Type == tea.KeyRunes {
 				ed.editBuf += string(msg.Runes)
+				ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 			}
 		}
 	}
@@ -184,7 +203,7 @@ func (m Model) viewShortcutsEditor() string {
 		b.WriteString("\n\n")
 		sc := ed.items[ed.cursor]
 		b.WriteString(m.theme.ConfigLabelStyle().Render("  Name:    ") + m.theme.ConfigEditStyle().Render(ed.editBuf+"\u2588") + "\n")
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  Content: ") + m.theme.ConfigValueStyle().Render(sc.Content) + "\n")
+		b.WriteString(m.theme.ConfigLabelStyle().Render("  Content: ") + m.theme.ConfigValueStyle().Render(truncate(sc.Content, 60)) + "\n")
 		b.WriteString("\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: next field  |  Esc: cancel"))
 		b.WriteString("\n")
@@ -197,10 +216,52 @@ func (m Model) viewShortcutsEditor() string {
 		b.WriteString(m.theme.ConfigTitleStyle().Render("Shortcuts — edit content"))
 		b.WriteString("\n\n")
 		sc := ed.items[ed.cursor]
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  Name:    ") + m.theme.ConfigValueStyle().Render(sc.Name) + "\n")
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  Content: ") + m.theme.ConfigEditStyle().Render(ed.editBuf+"\u2588") + "\n")
+		b.WriteString(m.theme.ConfigLabelStyle().Render("  Name: ") + m.theme.ConfigValueStyle().Render(sc.Name) + "\n")
+
+		// Windowed scrollable content display
+		const overhead = 7
+		available := m.height - overhead
+		if available < 3 {
+			available = 3
+		}
+
+		allLines := strings.Split(ed.editBuf, "\n")
+		totalLines := len(allLines)
+
+		scrollTop := ed.scrollTop
+		maxScroll := totalLines - available
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if scrollTop > maxScroll {
+			scrollTop = maxScroll
+		}
+		if scrollTop < 0 {
+			scrollTop = 0
+		}
+		endLine := scrollTop + available
+		if endLine > totalLines {
+			endLine = totalLines
+		}
+
+		if totalLines > available {
+			label := fmt.Sprintf("  Content (%d–%d / %d lines, ↑↓ to scroll):", scrollTop+1, endLine, totalLines)
+			b.WriteString(m.theme.ConfigLabelStyle().Render(label) + "\n")
+		} else {
+			b.WriteString(m.theme.ConfigLabelStyle().Render("  Content:") + "\n")
+		}
+
+		cursorLine := totalLines - 1
+		for i, line := range allLines[scrollTop:endLine] {
+			display := line
+			if scrollTop+i == cursorLine {
+				display += "\u2588"
+			}
+			b.WriteString(m.theme.ConfigEditStyle().Render("  "+display) + "\n")
+		}
+
 		b.WriteString("\n")
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: save  |  Esc: cancel"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: newline  |  Ctrl+S: save  |  ↑↓: scroll  |  Esc: cancel"))
 		b.WriteString("\n")
 	}
 
