@@ -89,6 +89,23 @@ func TestHistory_Truncate(t *testing.T) {
 	}
 }
 
+func TestHistory_MessageWithImages(t *testing.T) {
+	h := NewHistory()
+	img := ImageData{MimeType: "image/png", Data: []byte("fake-png")}
+	h.Add(Message{Role: "user", Content: "describe this", Images: []ImageData{img}})
+
+	msgs := h.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("len = %d, want 1", len(msgs))
+	}
+	if len(msgs[0].Images) != 1 {
+		t.Fatalf("images len = %d, want 1", len(msgs[0].Images))
+	}
+	if msgs[0].Images[0].MimeType != "image/png" {
+		t.Errorf("mime = %q, want image/png", msgs[0].Images[0].MimeType)
+	}
+}
+
 func TestHistory_Truncate_Noop(t *testing.T) {
 	h := NewHistory()
 	h.Add(Message{Role: "user", Content: "a"})

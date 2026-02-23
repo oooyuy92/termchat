@@ -1,9 +1,16 @@
 // internal/chat/history.go
 package chat
 
+// ImageData holds raw image bytes for multimodal messages.
+type ImageData struct {
+	MimeType string
+	Data     []byte
+}
+
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content string      `json:"content"`
+	Images  []ImageData `json:"-"`
 }
 
 type History struct {
