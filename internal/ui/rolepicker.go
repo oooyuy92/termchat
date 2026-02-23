@@ -24,7 +24,7 @@ func (m Model) updateRolePickerMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			p.cursor++
 		}
 	case "enter":
-		if len(p.items) == 0 {
+		if len(p.items) == 0 || p.cursor >= len(p.items) {
 			m.mode = modeChat
 			return m, nil
 		}
@@ -55,6 +55,14 @@ func (m Model) viewRolePicker() string {
 
 	b.WriteString(m.theme.ConfigTitleStyle().Render("选择角色"))
 	b.WriteString("\n\n")
+
+	if len(p.items) == 0 {
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  无可用角色。"))
+		b.WriteString("\n\n")
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Esc: 跳过"))
+		b.WriteString("\n")
+		return b.String() + "\n" + m.renderStatusBar()
+	}
 
 	for i, role := range p.items {
 		cursor := "  "
