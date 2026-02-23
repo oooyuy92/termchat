@@ -179,9 +179,9 @@ func (m Model) viewRolesEditor() string {
 		}
 		b.WriteString(m.theme.ConfigTitleStyle().Render("角色 — 编辑名称"))
 		b.WriteString("\n\n")
-		sc := ed.items[ed.cursor]
+		role := ed.items[ed.cursor]
 		b.WriteString(m.theme.ConfigLabelStyle().Render("  名称:   ") + m.theme.ConfigEditStyle().Render(ed.editBuf+"\u2588") + "\n")
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词: ") + m.theme.ConfigValueStyle().Render(truncate(sc.Prompt, 60)) + "\n")
+		b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词: ") + m.theme.ConfigValueStyle().Render(truncate(role.Prompt, 60)) + "\n")
 		b.WriteString("\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: next field  |  Esc: cancel"))
 		b.WriteString("\n")
@@ -193,8 +193,8 @@ func (m Model) viewRolesEditor() string {
 		}
 		b.WriteString(m.theme.ConfigTitleStyle().Render("角色 — 编辑提示词"))
 		b.WriteString("\n\n")
-		sc := ed.items[ed.cursor]
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  名称:   ") + m.theme.ConfigValueStyle().Render(sc.Name) + "\n")
+		role := ed.items[ed.cursor]
+		b.WriteString(m.theme.ConfigLabelStyle().Render("  名称:   ") + m.theme.ConfigValueStyle().Render(role.Name) + "\n")
 		b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词: ") + m.theme.ConfigEditStyle().Render(ed.editBuf+"\u2588") + "\n")
 		b.WriteString("\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: save  |  Esc: cancel"))
