@@ -28,6 +28,7 @@ const (
 	modeShortcuts
 	modeRolePicker
 	modeRoles
+	modeOnboard
 )
 
 // streamChunkMsg carries a token and optional thinking text from the streaming response.
@@ -202,7 +203,7 @@ func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
 	)
 }
 
-func NewModel(cfg config.Config, cfgPath string) (Model, error) {
+func NewModel(cfg config.Config, cfgPath string, onboarding bool) (Model, error) {
 	// Use actual terminal width so text wraps correctly from the first render.
 	// Fall back to 80 if the terminal size cannot be determined.
 	initialWidth := 80
@@ -239,6 +240,16 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 		initialMode = modeRolePicker
 	}
 
+	// onboarding takes priority over role picker
+	if onboarding {
+		initialMode = modeOnboard
+	}
+
+	var initConfigEd configEditor
+	if onboarding {
+		initConfigEd = configEditor{fields: buildOnboardFields(cfg)}
+	}
+
 	return Model{
 		cfg:           cfg,
 		client:        chat.NewClient(cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model),
@@ -252,6 +263,7 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 		mode:          initialMode,
 		rolesPath:     rolesPath,
 		rolePick:      rolePick,
+		configEd:      initConfigEd,
 	}, nil
 }
 
@@ -270,4 +282,9 @@ func (m *Model) recreateRenderer(width int) {
 	if err == nil {
 		m.renderer = r
 	}
+}
+
+// temporary stub — will be replaced in Task 3
+func buildOnboardFields(cfg config.Config) []configField {
+	return nil
 }

@@ -25,7 +25,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	model, err := ui.NewModel(cfg, configPath)
+	model, err := ui.NewModel(cfg, configPath, false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize: %v\n", err)
 		os.Exit(1)
