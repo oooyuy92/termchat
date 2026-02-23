@@ -261,51 +261,6 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		m.statusMsg = "Model set to " + parts[1]
 		return m, m.saveConfigCmd()
 
-	case "/save":
-		name := "default"
-		if len(parts) >= 2 {
-			name = parts[1]
-		}
-		err := m.store.Save(name, m.history.Messages())
-		if err != nil {
-			m.statusMsg = "Save failed: " + err.Error()
-		} else {
-			m.autoSaveName = name
-			m.statusMsg = "Saved as " + name
-		}
-		return m, nil
-
-	case "/load":
-		name := "default"
-		if len(parts) >= 2 {
-			name = parts[1]
-		}
-		msgs, err := m.store.Load(name)
-		if err != nil {
-			m.statusMsg = "Load failed: " + err.Error()
-		} else {
-			m.autoSaveName = name
-			m.history.Clear()
-			m.history.SetSystemPrompt("")
-			m.activeRole = ""
-			for _, msg := range msgs {
-				m.history.Add(msg)
-			}
-			m.statusMsg = "Loaded " + name
-		}
-		return m, nil
-
-	case "/list":
-		names, err := m.store.List()
-		if err != nil {
-			m.statusMsg = "List failed: " + err.Error()
-		} else if len(names) == 0 {
-			m.statusMsg = "No saved conversations"
-		} else {
-			m.statusMsg = "Saved: " + strings.Join(names, ", ")
-		}
-		return m, nil
-
 	case "/resume":
 		convs, err := m.store.ListWithDate()
 		if err != nil {
