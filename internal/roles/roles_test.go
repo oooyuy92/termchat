@@ -12,8 +12,8 @@ func TestLoadNonExistent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil", err)
 	}
-	if loaded == nil {
-		t.Error("Load() returned nil, want non-nil slice")
+	if len(loaded) != 0 {
+		t.Errorf("Load() = %v, want empty", loaded)
 	}
 }
 
@@ -64,8 +64,8 @@ func TestSaveNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if loaded == nil {
-		t.Error("Load() returned nil, want non-nil slice")
+	if len(loaded) != 0 {
+		t.Errorf("Load() after Save(nil) = %v, want empty", loaded)
 	}
 }
 
