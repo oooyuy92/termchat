@@ -21,26 +21,44 @@ type SettingsConfig struct {
 }
 
 type APIConfig struct {
-	BaseURL string `yaml:"base_url"`
-	APIKey  string `yaml:"api_key"`
-	Model   string `yaml:"model"`
+	Provider string `yaml:"provider"`
+	BaseURL  string `yaml:"base_url"`
+	APIKey   string `yaml:"api_key"`
+	Model    string `yaml:"model"`
 }
 
 type ParametersConfig struct {
 	Temperature     float64 `yaml:"temperature"`
 	MaxTokens       int     `yaml:"max_tokens"`
 	ReasoningEffort string  `yaml:"reasoning_effort,omitempty"`
+	BudgetTokens    int     `yaml:"budget_tokens,omitempty"`
 }
 
 type StorageConfig struct {
 	Dir string `yaml:"dir"`
 }
 
+// ProviderDefaultBaseURL returns the canonical base URL for a provider.
+// Returns "" for openai-compatible (user must supply).
+func ProviderDefaultBaseURL(provider string) string {
+	switch provider {
+	case "openai":
+		return "https://api.openai.com/v1"
+	case "anthropic":
+		return "https://api.anthropic.com"
+	case "gemini":
+		return "https://generativelanguage.googleapis.com"
+	default: // openai-compatible
+		return ""
+	}
+}
+
 func DefaultConfig() Config {
 	return Config{
 		API: APIConfig{
-			BaseURL: "https://api.openai.com/v1",
-			Model:   "gpt-4o",
+			Provider: "openai-compatible",
+			BaseURL:  "https://api.openai.com/v1",
+			Model:    "gpt-4o",
 		},
 		Parameters: ParametersConfig{
 			Temperature: 0.7,
