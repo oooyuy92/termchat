@@ -78,6 +78,41 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadNotFound(t *testing.T) {
+	cfg, missing, err := LoadOrDefault("/nonexistent/path/config.yaml")
+	if err != nil {
+		t.Fatalf("LoadOrDefault() error = %v", err)
+	}
+	if !missing {
+		t.Error("LoadOrDefault() missing = false, want true")
+	}
+	if cfg.API.BaseURL != "https://api.openai.com/v1" {
+		t.Errorf("BaseURL = %q, want default", cfg.API.BaseURL)
+	}
+	if cfg.Parameters.Temperature != 0.7 {
+		t.Errorf("Temperature = %f, want 0.7", cfg.Parameters.Temperature)
+	}
+}
+
+func TestLoadOrDefaultExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := []byte("api:\n  api_key: \"sk-test\"\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, missing, err := LoadOrDefault(path)
+	if err != nil {
+		t.Fatalf("LoadOrDefault() error = %v", err)
+	}
+	if missing {
+		t.Error("LoadOrDefault() missing = true for existing file, want false")
+	}
+	if cfg.API.APIKey != "sk-test" {
+		t.Errorf("APIKey = %q, want %q", cfg.API.APIKey, "sk-test")
+	}
+}
+
 func TestSaveConfig(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "subdir", "config.yaml")

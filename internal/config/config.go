@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -66,6 +68,20 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// LoadOrDefault loads config from path. If the file does not exist, it returns
+// DefaultConfig() and missing=true. For any other error it returns the error.
+// missing=true means "file was missing" (caller should show onboarding).
+func LoadOrDefault(path string) (cfg Config, missing bool, err error) {
+	cfg, err = Load(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return DefaultConfig(), true, nil
+		}
+		return cfg, false, err
+	}
+	return cfg, false, nil
 }
 
 func ConfigDir() string {
