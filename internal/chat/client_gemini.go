@@ -29,7 +29,7 @@ func NewGeminiClient(baseURL, apiKey, model string) *GeminiClient {
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		model:   model,
-		http:    &http.Client{},
+		http:    newHTTPClient(),
 	}
 }
 

@@ -1,7 +1,12 @@
 // internal/chat/provider.go
 package chat
 
-import "context"
+import (
+	"context"
+	"net"
+	"net/http"
+	"time"
+)
 
 // Provider is the interface all LLM backends must implement.
 type Provider interface {
@@ -12,6 +17,19 @@ type Provider interface {
 	SetAPIKey(string)
 	BaseURL() string
 	APIKey() string
+}
+
+// newHTTPClient returns an http.Client with a 30-second dial timeout.
+// No overall timeout is set because streaming responses can last a long time.
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout: 15 * time.Second,
+		},
+	}
 }
 
 // NewProvider creates the appropriate Provider for the given provider string.
