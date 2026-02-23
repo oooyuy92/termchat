@@ -12,12 +12,13 @@ func TestFilterSlashCmds_slash(t *testing.T) {
 func TestFilterSlashCmds_prefix(t *testing.T) {
 	got := filterSlashCmds("/r")
 	if len(got) != 2 {
-		t.Errorf("filterSlashCmds(\"/r\") = %d results, want 2", len(got))
+		t.Fatalf("filterSlashCmds(\"/r\") = %d results, want 2", len(got))
 	}
-	for _, c := range got {
-		if c.Name != "/resume" && c.Name != "/roles" {
-			t.Errorf("unexpected match: %s", c.Name)
-		}
+	if got[0].Name != "/resume" {
+		t.Errorf("got[0].Name = %q, want \"/resume\"", got[0].Name)
+	}
+	if got[1].Name != "/roles" {
+		t.Errorf("got[1].Name = %q, want \"/roles\"", got[1].Name)
 	}
 }
 
