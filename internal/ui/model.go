@@ -29,6 +29,7 @@ const (
 	modeRolePicker
 	modeRoles
 	modeOnboard
+	modeSlashComplete
 )
 
 // streamChunkMsg carries a token and optional thinking text from the streaming response.
@@ -174,6 +175,7 @@ type Model struct {
 	cfgPath         string
 	autoSaveName    string
 	input           string
+	slashAC         slashComplete
 	streaming       bool
 	confirmQuit     bool
 	currentResp     string
