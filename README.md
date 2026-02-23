@@ -2,6 +2,9 @@
 
 A terminal chat interface for AI conversations. Supports OpenAI-compatible APIs.
 
+## Purpose
+When I want to use a browser or a third-party AI chat client, my computer becomes very slow. In fact, AI chat does not require very many additional features; I just hope to establish a connection with the AI faster, so I wrote this project.
+
 ## Install
 
 ```bash
