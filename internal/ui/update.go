@@ -3,6 +3,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -111,7 +112,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.handleCommand(input)
 			}
 
-			m.history.Add(chat.Message{Role: "user", Content: input})
+			m.history.Add(chat.Message{Role: "user", Content: input, Images: m.pendingImages})
+			m.pendingImages = nil
 			m.streaming = true
 			m.currentResp = ""
 			m.currentThinking = ""
@@ -127,6 +129,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(runes) > 0 {
 				m.input = string(runes[:len(runes)-1])
 			}
+
+		case "ctrl+v":
+			return m, m.pasteFromClipboard()
 
 		default:
 			if msg.Type == tea.KeyRunes {
@@ -213,6 +218,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Copied"
 		}
 		return m, nil
+
+	case clipboardImageMsg:
+		if msg.Err != nil {
+			m.statusMsg = "Paste failed: " + msg.Err.Error()
+			return m, nil
+		}
+		if msg.Image != nil {
+			m.imageCounter++
+			m.pendingImages = append(m.pendingImages, *msg.Image)
+			m.input += fmt.Sprintf("[image %d]", m.imageCounter)
+			m.statusMsg = fmt.Sprintf("Image %d pasted", m.imageCounter)
+			return m, nil
+		}
+		m.input += msg.Text
+		if m.input == "/" {
+			m.mode = modeSlashComplete
+			m.slashAC = slashComplete{
+				matches: filterSlashCmds("/"),
+				cursor:  0,
+				offset:  0,
+			}
+		}
+		return m, nil
 	}
 
 	return m, nil
@@ -266,6 +294,20 @@ func (m Model) autoSaveCmd() tea.Cmd {
 	}
 }
 
+func (m Model) pasteFromClipboard() tea.Cmd {
+	return func() tea.Msg {
+		img, err := readImageFromClipboard()
+		if err != nil {
+			return clipboardImageMsg{Err: err}
+		}
+		if img != nil {
+			return clipboardImageMsg{Image: img}
+		}
+		text, err := readTextFromClipboard()
+		return clipboardImageMsg{Text: text, Err: err}
+	}
+}
+
 func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 	m.escCount = 0
 	parts := strings.Fields(input)
@@ -278,6 +320,8 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 	case "/clear":
 		m.history.Clear()
 		m.totalTokens = 0
+		m.pendingImages = nil
+		m.imageCounter = 0
 		m.statusMsg = "Conversation cleared"
 		return m, nil
 

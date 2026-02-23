@@ -72,6 +72,13 @@ type shortcutsSavedMsg struct{ Err error }
 // rolesSavedMsg carries the result of saving roles to disk.
 type rolesSavedMsg struct{ Err error }
 
+// clipboardImageMsg carries the result of a clipboard paste attempt.
+type clipboardImageMsg struct {
+	Image *chat.ImageData
+	Text  string
+	Err   error
+}
+
 type configField struct {
 	Label   string
 	Key     string
@@ -178,6 +185,8 @@ type Model struct {
 	cfgPath         string
 	autoSaveName    string
 	input           string
+	pendingImages   []chat.ImageData
+	imageCounter    int
 	slashAC         slashComplete
 	escCount        int // consecutive Esc presses in chat mode for double-Esc detection
 	browseCursor    int // index of selected message in modeMessageBrowse
