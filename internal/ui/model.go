@@ -30,6 +30,7 @@ const (
 	modeRoles
 	modeOnboard
 	modeSlashComplete
+	modeMessageBrowse
 )
 
 // streamChunkMsg carries a token and optional thinking text from the streaming response.
@@ -176,6 +177,8 @@ type Model struct {
 	autoSaveName    string
 	input           string
 	slashAC         slashComplete
+	escCount        int // consecutive Esc presses in chat mode for double-Esc detection
+	browseCursor    int // index of selected message in modeMessageBrowse
 	streaming       bool
 	confirmQuit     bool
 	currentResp     string
