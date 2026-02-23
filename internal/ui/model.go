@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
+	"github.com/termchat/termchat/internal/roles"
 	"github.com/termchat/termchat/internal/shortcuts"
 	"github.com/termchat/termchat/internal/storage"
 	"golang.org/x/term"
@@ -25,6 +26,8 @@ const (
 	modeConfig
 	modeResume
 	modeShortcuts
+	modeRolePicker
+	modeRoles
 )
 
 // streamChunkMsg carries a token and optional thinking text from the streaming response.
@@ -62,6 +65,9 @@ type autoSavedMsg struct{ Err error }
 
 // shortcutsSavedMsg carries the result of saving shortcuts to disk.
 type shortcutsSavedMsg struct{ Err error }
+
+// rolesSavedMsg carries the result of saving roles to disk.
+type rolesSavedMsg struct{ Err error }
 
 type configField struct {
 	Label   string
@@ -109,6 +115,30 @@ type shortcutEditor struct {
 	isNew        bool   // true when 'n' added a new item
 }
 
+// roleSubMode describes what the role editor is currently doing.
+type roleSubMode int
+
+const (
+	roleModeList       roleSubMode = iota
+	roleModeEditName               // editing the name field
+	roleModeEditPrompt             // editing the prompt field
+)
+
+type roleEditor struct {
+	items       []roles.Role
+	cursor      int
+	subMode     roleSubMode
+	editBuf     string
+	savedName   string
+	savedPrompt string
+	isNew       bool
+}
+
+type rolePicker struct {
+	items  []roles.Role
+	cursor int
+}
+
 type streamControl struct {
 	cancel context.CancelFunc
 }
@@ -136,6 +166,10 @@ type Model struct {
 	resumePick      resumePicker
 	shortcutsPath   string
 	shortcutEd      shortcutEditor
+	rolesPath       string
+	roleEd          roleEditor
+	rolePick        rolePicker
+	activeRole      string // name of the selected role; shown in status bar
 	cfgPath         string
 	autoSaveName    string
 	input           string
@@ -192,6 +226,15 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 	}
 
 	shortcutsPath := filepath.Join(filepath.Dir(cfgPath), "shortcuts.yaml")
+	rolesPath := filepath.Join(filepath.Dir(cfgPath), "roles.yaml")
+
+	rolesList, _ := roles.Load(rolesPath)
+	initialMode := modeChat
+	var rolePick rolePicker
+	if len(rolesList) > 0 {
+		rolePick = rolePicker{items: rolesList}
+		initialMode = modeRolePicker
+	}
 
 	return Model{
 		cfg:           cfg,
@@ -203,6 +246,9 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 		shortcutsPath: shortcutsPath,
 		theme:         ThemeByName(cfg.Settings.Theme),
 		autoSaveName:  time.Now().Format("2006-01-02_150405"),
+		mode:          initialMode,
+		rolesPath:     rolesPath,
+		rolePick:      rolePick,
 	}, nil
 }
 
