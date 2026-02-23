@@ -78,9 +78,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "esc":
-			if m.streaming {
-				return m, nil
-			}
 			m.escCount++
 			if m.escCount >= 2 {
 				m.escCount = 0
@@ -159,6 +156,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamDoneMsg:
 		m.streaming = false
+		m.escCount = 0
 		if m.currentResp != "" {
 			m.history.Add(chat.Message{Role: "assistant", Content: m.currentResp})
 		}
@@ -267,6 +265,7 @@ func (m Model) autoSaveCmd() tea.Cmd {
 }
 
 func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
+	m.escCount = 0
 	parts := strings.Fields(input)
 	cmd := parts[0]
 
