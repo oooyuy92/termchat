@@ -54,7 +54,7 @@ func Save(path string, items []Role) error {
 	}
 	data, err := yaml.Marshal(file{Roles: items})
 	if err != nil {
-		return err
+		return fmt.Errorf("roles: marshal: %w", err)
 	}
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("roles: write %s: %w", path, err)
