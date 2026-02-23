@@ -228,7 +228,10 @@ func NewModel(cfg config.Config, cfgPath string) (Model, error) {
 	shortcutsPath := filepath.Join(filepath.Dir(cfgPath), "shortcuts.yaml")
 	rolesPath := filepath.Join(filepath.Dir(cfgPath), "roles.yaml")
 
-	rolesList, _ := roles.Load(rolesPath)
+	rolesList, err := roles.Load(rolesPath)
+	if err != nil {
+		return Model{}, fmt.Errorf("load roles: %w", err)
+	}
 	initialMode := modeChat
 	var rolePick rolePicker
 	if len(rolesList) > 0 {
