@@ -24,6 +24,7 @@ type Provider interface {
 func newHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout: 30 * time.Second,
 			}).DialContext,
