@@ -166,6 +166,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamErrMsg:
 		m.streaming = false
+		m.escCount = 0
 		m.err = msg.Err
 		m.currentResp = ""
 		m.currentThinking = ""
