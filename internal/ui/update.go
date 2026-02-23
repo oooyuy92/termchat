@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/termchat/termchat/internal/chat"
+	"github.com/termchat/termchat/internal/shortcuts"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -26,6 +27,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.mode == modeResume {
 			return m.updateResumeMode(msg)
+		}
+		if m.mode == modeShortcuts {
+			return m.updateShortcutsMode(msg)
 		}
 
 		if m.streaming {
@@ -138,6 +142,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case autoSavedMsg:
 		if msg.Err != nil {
 			m.statusMsg = "Auto-save failed: " + msg.Err.Error()
+		}
+		return m, nil
+
+	case shortcutsSavedMsg:
+		if msg.Err != nil {
+			m.statusMsg = "Shortcuts save failed: " + msg.Err.Error()
 		}
 		return m, nil
 	}
@@ -271,6 +281,16 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		}
 		m.resumePick = buildResumePicker(convs)
 		m.mode = modeResume
+		return m, nil
+
+	case "/shortcuts":
+		items, err := shortcuts.Load(m.shortcutsPath)
+		if err != nil {
+			m.statusMsg = "Failed to load shortcuts: " + err.Error()
+			return m, nil
+		}
+		m.shortcutEd = shortcutEditor{items: items}
+		m.mode = modeShortcuts
 		return m, nil
 
 	default:

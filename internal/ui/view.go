@@ -36,6 +36,9 @@ func (m Model) View() string {
 	if m.mode == modeResume {
 		return m.viewResumePicker()
 	}
+	if m.mode == modeShortcuts {
+		return m.viewShortcutsEditor()
+	}
 
 	var b strings.Builder
 
