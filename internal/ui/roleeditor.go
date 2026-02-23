@@ -109,10 +109,12 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case roleModeEditPrompt:
 		switch msg.String() {
-		case "enter":
+		case "ctrl+s":
 			ed.items[ed.cursor].Prompt = ed.editBuf
 			ed.subMode = roleModeList
 			return m, m.saveRolesCmd()
+		case "enter":
+			ed.editBuf += "\n"
 		case "esc":
 			if ed.isNew {
 				ed.items = ed.items[:len(ed.items)-1]
@@ -198,9 +200,12 @@ func (m Model) viewRolesEditor() string {
 		b.WriteString("\n\n")
 		role := ed.items[ed.cursor]
 		b.WriteString(m.theme.ConfigLabelStyle().Render("  名称:   ") + m.theme.ConfigValueStyle().Render(role.Name) + "\n")
-		b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词: ") + m.theme.ConfigEditStyle().Render(ed.editBuf+"\u2588") + "\n")
+		b.WriteString(m.theme.ConfigLabelStyle().Render("  提示词:\n"))
+		for _, line := range strings.Split(ed.editBuf+"\u2588", "\n") {
+			b.WriteString(m.theme.ConfigEditStyle().Render("  "+line) + "\n")
+		}
 		b.WriteString("\n")
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: save  |  Esc: cancel"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: newline  |  Ctrl+S: save  |  Esc: cancel"))
 		b.WriteString("\n")
 	}
 
