@@ -181,6 +181,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Roles saved"
 		}
 		return m, nil
+
+	case clipboardResultMsg:
+		if msg.Err != nil {
+			m.statusMsg = "Copy failed: " + msg.Err.Error()
+		} else {
+			m.statusMsg = "Copied"
+		}
+		return m, nil
 	}
 
 	return m, nil

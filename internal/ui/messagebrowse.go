@@ -7,9 +7,18 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+type clipboardResultMsg struct{ Err error }
+
+func copyToClipboardCmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		return clipboardResultMsg{Err: writeToClipboard(text)}
+	}
+}
 
 // writeToClipboard copies text to the system clipboard using platform-native commands.
 func writeToClipboard(text string) error {
@@ -96,17 +105,13 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		newName := time.Now().Format("2006-01-02_150405")
 		m.history.Truncate(m.browseCursor + 1)
 		m.autoSaveName = newName
-		m.statusMsg = "Branched: " + newName
+		m.statusMsg = fmt.Sprintf("Branched at message %d: %s", m.browseCursor+1, newName)
 		m.mode = modeChat
 		return m, m.autoSaveCmd()
 
 	case "c":
-		if len(msgs) > m.browseCursor {
-			if err := writeToClipboard(msgs[m.browseCursor].Content); err != nil {
-				m.statusMsg = "Copy failed: " + err.Error()
-			} else {
-				m.statusMsg = "Copied"
-			}
+		if m.browseCursor >= 0 && m.browseCursor < len(msgs) {
+			return m, copyToClipboardCmd(msgs[m.browseCursor].Content)
 		}
 	}
 
@@ -133,8 +138,9 @@ func (m Model) viewMessageBrowse() string {
 
 	// Header line
 	header := fmt.Sprintf("── Message %d / %d ── %s ", cur+1, len(msgs), selected.Role)
-	if m.width > len(header)+2 {
-		header += strings.Repeat("─", m.width-len(header)-1)
+	headerRunes := utf8.RuneCountInString(header)
+	if m.width > headerRunes+2 {
+		header += strings.Repeat("─", m.width-headerRunes-1)
 	}
 	b.WriteString(m.theme.ConfigTitleStyle().Render(header) + "\n\n")
 
