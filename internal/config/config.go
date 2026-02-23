@@ -72,7 +72,6 @@ func Load(path string) (Config, error) {
 
 // LoadOrDefault loads config from path. If the file does not exist, it returns
 // DefaultConfig() and missing=true. For any other error it returns the error.
-// missing=true means "file was missing" (caller should show onboarding).
 func LoadOrDefault(path string) (cfg Config, missing bool, err error) {
 	cfg, err = Load(path)
 	if err != nil {

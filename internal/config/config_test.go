@@ -78,7 +78,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadNotFound(t *testing.T) {
+func TestLoadOrDefaultMissing(t *testing.T) {
 	cfg, missing, err := LoadOrDefault("/nonexistent/path/config.yaml")
 	if err != nil {
 		t.Fatalf("LoadOrDefault() error = %v", err)
@@ -91,6 +91,22 @@ func TestLoadNotFound(t *testing.T) {
 	}
 	if cfg.Parameters.Temperature != 0.7 {
 		t.Errorf("Temperature = %f, want 0.7", cfg.Parameters.Temperature)
+	}
+}
+
+func TestLoadOrDefaultBadFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// Write invalid YAML
+	if err := os.WriteFile(path, []byte(":\ninvalid: [yaml\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, missing, err := LoadOrDefault(path)
+	if err == nil {
+		t.Error("LoadOrDefault() error = nil, want non-nil for bad YAML")
+	}
+	if missing {
+		t.Error("LoadOrDefault() missing = true for bad YAML, want false")
 	}
 }
 
