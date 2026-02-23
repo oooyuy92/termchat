@@ -44,6 +44,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeSlashComplete {
 			return m.updateSlashComplete(msg)
 		}
+		if m.mode == modeMessageBrowse {
+			return m.updateMessageBrowse(msg)
+		}
 
 		if m.streaming {
 			if msg.String() == "ctrl+c" {
@@ -68,8 +71,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() != "ctrl+c" {
 			m.confirmQuit = false
 		}
+		// Reset escCount on any key other than esc and ctrl+c
+		if msg.String() != "ctrl+c" && msg.String() != "esc" {
+			m.escCount = 0
+		}
 
 		switch msg.String() {
+		case "esc":
+			if m.streaming {
+				return m, nil
+			}
+			m.escCount++
+			if m.escCount >= 2 {
+				m.escCount = 0
+				if len(m.history.Messages()) == 0 {
+					m.statusMsg = "No messages to browse"
+					return m, nil
+				}
+				m.browseCursor = len(m.history.Messages()) - 1
+				m.mode = modeMessageBrowse
+			} else {
+				m.statusMsg = "Press Esc again to browse messages"
+			}
+			return m, nil
+
 		case "ctrl+c":
 			if m.confirmQuit {
 				return m, tea.Quit

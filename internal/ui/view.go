@@ -51,6 +51,9 @@ func (m Model) View() string {
 	if m.mode == modeSlashComplete {
 		return m.viewSlashComplete()
 	}
+	if m.mode == modeMessageBrowse {
+		return m.viewMessageBrowse()
+	}
 
 	var b strings.Builder
 
