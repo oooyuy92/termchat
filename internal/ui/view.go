@@ -39,6 +39,12 @@ func (m Model) View() string {
 	if m.mode == modeShortcuts {
 		return m.viewShortcutsEditor()
 	}
+	if m.mode == modeRolePicker {
+		return m.viewRolePicker()
+	}
+	if m.mode == modeRoles {
+		return m.viewRolesEditor()
+	}
 
 	var b strings.Builder
 

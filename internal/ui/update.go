@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/termchat/termchat/internal/chat"
+	"github.com/termchat/termchat/internal/roles"
 	"github.com/termchat/termchat/internal/shortcuts"
 )
 
@@ -30,6 +31,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.mode == modeShortcuts {
 			return m.updateShortcutsMode(msg)
+		}
+		if m.mode == modeRolePicker {
+			return m.updateRolePickerMode(msg)
+		}
+		if m.mode == modeRoles {
+			return m.updateRolesMode(msg)
 		}
 
 		if m.streaming {
@@ -150,6 +157,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Shortcuts save failed: " + msg.Err.Error()
 		} else {
 			m.statusMsg = "Shortcuts saved"
+		}
+		return m, nil
+
+	case rolesSavedMsg:
+		if msg.Err != nil {
+			m.statusMsg = "Roles save failed: " + msg.Err.Error()
+		} else {
+			m.statusMsg = "Roles saved"
 		}
 		return m, nil
 	}
@@ -293,6 +308,19 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		}
 		m.shortcutEd = shortcutEditor{items: items}
 		m.mode = modeShortcuts
+		return m, nil
+
+	case "/roles":
+		items, err := roles.Load(m.rolesPath)
+		if err != nil {
+			m.statusMsg = "Failed to load roles: " + err.Error()
+			return m, nil
+		}
+		if len(items) == 0 {
+			items = append([]roles.Role{}, roles.Defaults...)
+		}
+		m.roleEd = roleEditor{items: items}
+		m.mode = modeRoles
 		return m, nil
 
 	default:
