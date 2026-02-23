@@ -3,7 +3,9 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,5 +146,119 @@ func TestClient_SendStreamGeminiThought(t *testing.T) {
 	}
 	if thinkingBuf.String() != "gemini thinking" {
 		t.Errorf("thinking = %q, want %q", thinkingBuf.String(), "gemini thinking")
+	}
+}
+
+func TestAnthropicClient_SendStream(t *testing.T) {
+	// Simulate Anthropic SSE stream
+	sseBody := "event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") == "" {
+			t.Error("missing x-api-key header")
+		}
+		if r.Header.Get("anthropic-version") == "" {
+			t.Error("missing anthropic-version header")
+		}
+		if r.URL.Path != "/v1/messages" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseBody)
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(server.URL, "test-key", "claude-opus-4-5")
+	messages := []Message{
+		{Role: "user", Content: "hi"},
+	}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
+
+	var result string
+	for chunk := range chunks {
+		result += chunk.Content
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Hello world" {
+		t.Errorf("got %q, want %q", result, "Hello world")
+	}
+}
+
+func TestAnthropicClient_SendStreamThinking(t *testing.T) {
+	sseBody := "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me think\"}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "budget_tokens") {
+			t.Error("expected budget_tokens in request when budgetTokens > 0")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseBody)
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(server.URL, "test-key", "claude-opus-4-5")
+	messages := []Message{{Role: "user", Content: "think"}}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 1.0, 16000, "", 10000)
+
+	var text, thinking string
+	for chunk := range chunks {
+		text += chunk.Content
+		thinking += chunk.Thinking
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != "Answer" {
+		t.Errorf("text: got %q, want %q", text, "Answer")
+	}
+	if thinking != "Let me think" {
+		t.Errorf("thinking: got %q, want %q", thinking, "Let me think")
+	}
+}
+
+func TestAnthropicClient_SystemPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyStr := string(body)
+		if !strings.Contains(bodyStr, `"system"`) {
+			t.Error("expected top-level system field")
+		}
+		var req map[string]interface{}
+		json.Unmarshal(body, &req)
+		msgs, _ := req["messages"].([]interface{})
+		for _, m := range msgs {
+			msg := m.(map[string]interface{})
+			if msg["role"] == "system" {
+				t.Error("system message should not appear in messages array")
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(server.URL, "test-key", "claude-opus-4-5")
+	messages := []Message{
+		{Role: "system", Content: "You are helpful"},
+		{Role: "user", Content: "hi"},
+	}
+	ctx := context.Background()
+	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
+	for range chunks {}
+	if err := <-errs; err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
