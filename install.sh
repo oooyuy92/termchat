@@ -21,8 +21,8 @@ case "$ARCH" in
 esac
 
 # Get latest release version via redirect (avoids GitHub API rate limits)
-VERSION=$(curl -sfLI "https://github.com/${REPO}/releases/latest" \
-  | grep -i "^location:" | sed 's|.*/tag/||' | tr -d '[:space:]')
+VERSION=$(curl -Ls -o /dev/null -w "%{url_effective}" \
+  "https://github.com/${REPO}/releases/latest" | sed 's|.*/||')
 
 if [ -z "$VERSION" ]; then
   echo "Error: could not determine latest version" && exit 1
