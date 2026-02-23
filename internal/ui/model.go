@@ -284,7 +284,3 @@ func (m *Model) recreateRenderer(width int) {
 	}
 }
 
-// temporary stub — will be replaced in Task 3
-func buildOnboardFields(cfg config.Config) []configField {
-	return nil
-}

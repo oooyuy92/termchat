@@ -21,6 +21,15 @@ func buildConfigFields(cfg config.Config) []configField {
 	}
 }
 
+// buildOnboardFields returns the 3 API fields needed for first-run onboarding.
+func buildOnboardFields(cfg config.Config) []configField {
+	return []configField{
+		{Label: "API Base URL", Key: "base_url", Value: cfg.API.BaseURL},
+		{Label: "API Key", Key: "api_key", Value: cfg.API.APIKey, Masked: true},
+		{Label: "Model", Key: "model", Value: cfg.API.Model},
+	}
+}
+
 func maskValue(s string) string {
 	if len(s) <= 4 {
 		return strings.Repeat("*", len(s))
