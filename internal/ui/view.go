@@ -48,6 +48,9 @@ func (m Model) View() string {
 	if m.mode == modeOnboard {
 		return m.viewOnboard()
 	}
+	if m.mode == modeSlashComplete {
+		return m.viewSlashComplete()
+	}
 
 	var b strings.Builder
 

@@ -41,6 +41,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeOnboard {
 			return m.updateOnboardMode(msg)
 		}
+		if m.mode == modeSlashComplete {
+			return m.updateSlashComplete(msg)
+		}
 
 		if m.streaming {
 			if msg.String() == "ctrl+c" {
@@ -104,9 +107,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		default:
-			// Handle rune input for multi-byte characters
 			if msg.Type == tea.KeyRunes {
 				m.input += string(msg.Runes)
+				// Enter slash autocomplete mode when "/" is typed as the first character
+				if m.input == "/" {
+					m.mode = modeSlashComplete
+					m.slashAC = slashComplete{
+						matches: filterSlashCmds("/"),
+						cursor:  0,
+						offset:  0,
+					}
+				}
 			}
 		}
 		return m, nil
