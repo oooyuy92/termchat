@@ -20,6 +20,7 @@ func main() {
 	cfg, onboarding, err := config.LoadOrDefault(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config from %s: %v\n", configPath, err)
+		fmt.Fprintf(os.Stderr, "Tip: delete the file to reset to defaults.\n")
 		os.Exit(1)
 	}
 
