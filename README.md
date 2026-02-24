@@ -36,6 +36,7 @@ storage:
 
 settings:
   theme: "dark"  # dark or light
+  alternate_screen: "auto"  # auto, always, never
 ```
 
 ## Usage
@@ -44,6 +45,8 @@ settings:
 termchat
 # or with a custom config
 termchat --config /path/to/config.yaml
+# force inline mode (no alternate screen)
+termchat --no-alt-screen
 ```
 
 ## Features

@@ -76,6 +76,28 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.Parameters.MaxTokens != 4096 {
 		t.Errorf("default MaxTokens = %d, want %d", cfg.Parameters.MaxTokens, 4096)
 	}
+	if cfg.Settings.AlternateScreen != "auto" {
+		t.Errorf("default AlternateScreen = %q, want %q", cfg.Settings.AlternateScreen, "auto")
+	}
+}
+
+func TestLoadConfigAlternateScreen(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	content := []byte(`settings:
+  alternate_screen: "never"
+`)
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Settings.AlternateScreen != "never" {
+		t.Errorf("AlternateScreen = %q, want %q", cfg.Settings.AlternateScreen, "never")
+	}
 }
 
 func TestLoadOrDefaultMissing(t *testing.T) {

@@ -14,3 +14,4 @@ storage:
 
 settings:
   theme: "dark"  # dark or light
+  alternate_screen: "auto"  # auto, always, never

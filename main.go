@@ -4,17 +4,19 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/ui"
+	"golang.org/x/term"
 )
 
-func parseCLIArgs(args []string) (configPath string, useAltScreen bool, err error) {
+func parseCLIArgs(args []string) (configPath string, noAltScreen bool, err error) {
 	configPath = config.DefaultConfigPath()
-	useAltScreen = true
 
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
@@ -25,15 +27,40 @@ func parseCLIArgs(args []string) (configPath string, useAltScreen bool, err erro
 			i++
 			configPath = args[i]
 		case "--no-alt-screen":
-			useAltScreen = false
+			noAltScreen = true
 		}
 	}
 
-	return configPath, useAltScreen, nil
+	return configPath, noAltScreen, nil
+}
+
+func resolveAltScreenMode(noAltScreen bool, mode string) bool {
+	if noAltScreen {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "always":
+		return true
+	case "never":
+		return false
+	default: // auto + invalid values
+		return os.Getenv("ZELLIJ") == ""
+	}
+}
+
+func setAlternateScroll(w io.Writer, enabled bool) {
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return
+	}
+	if enabled {
+		_, _ = io.WriteString(w, "\x1b[?1007h")
+		return
+	}
+	_, _ = io.WriteString(w, "\x1b[?1007l")
 }
 
 func main() {
-	configPath, useAltScreen, err := parseCLIArgs(os.Args)
+	configPath, noAltScreen, err := parseCLIArgs(os.Args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -54,9 +81,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	useAltScreen := resolveAltScreenMode(noAltScreen, cfg.Settings.AlternateScreen)
+
 	var opts []tea.ProgramOption
 	if useAltScreen {
 		opts = append(opts, tea.WithAltScreen())
+		setAlternateScroll(os.Stdout, true)
+		defer setAlternateScroll(os.Stdout, false)
 	}
 	p := tea.NewProgram(model, opts...)
 

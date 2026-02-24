@@ -17,7 +17,8 @@ type Config struct {
 }
 
 type SettingsConfig struct {
-	Theme string `yaml:"theme"`
+	Theme           string `yaml:"theme"`
+	AlternateScreen string `yaml:"alternate_screen"`
 }
 
 type APIConfig struct {
@@ -68,7 +69,8 @@ func DefaultConfig() Config {
 			Dir: "~/.local/share/termchat/conversations",
 		},
 		Settings: SettingsConfig{
-			Theme: "dark",
+			Theme:           "dark",
+			AlternateScreen: "auto",
 		},
 	}
 }

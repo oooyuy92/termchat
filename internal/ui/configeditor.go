@@ -22,6 +22,7 @@ func buildConfigFields(cfg config.Config) []configField {
 		{Label: "Reasoning Effort", Key: "reasoning_effort", Value: cfg.Parameters.ReasoningEffort, Options: []string{"", "minimal", "low", "medium", "high"}},
 		{Label: "Budget Tokens", Key: "budget_tokens", Value: strconv.Itoa(cfg.Parameters.BudgetTokens)},
 		{Label: "Theme", Key: "theme", Value: cfg.Settings.Theme, Options: []string{"dark", "light"}},
+		{Label: "Alt Screen", Key: "alternate_screen", Value: cfg.Settings.AlternateScreen, Options: []string{"auto", "always", "never"}},
 	}
 }
 
@@ -84,6 +85,11 @@ func validateField(key, value string) string {
 		if v != "dark" && v != "light" {
 			return "must be dark or light"
 		}
+	case "alternate_screen":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v != "auto" && v != "always" && v != "never" {
+			return "must be auto, always, or never"
+		}
 	}
 	return ""
 }
@@ -113,6 +119,8 @@ func applyFieldToConfig(cfg *config.Config, key, value string) {
 		}
 	case "theme":
 		cfg.Settings.Theme = strings.ToLower(strings.TrimSpace(value))
+	case "alternate_screen":
+		cfg.Settings.AlternateScreen = strings.ToLower(strings.TrimSpace(value))
 	}
 }
 
