@@ -65,7 +65,6 @@ func (c *AnthropicClient) SendStreamChan(ctx context.Context, messages []Message
 
 	go func() {
 		defer close(chunks)
-		defer close(errs)
 
 		if err := c.stream(ctx, messages, temp, maxTokens, budgetTokens, chunks); err != nil {
 			errs <- err

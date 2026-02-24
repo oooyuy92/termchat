@@ -52,7 +52,6 @@ func (c *GeminiClient) SendStreamChan(ctx context.Context, messages []Message, t
 
 	go func() {
 		defer close(chunks)
-		defer close(errs)
 
 		if err := c.stream(ctx, messages, temp, maxTokens, reasoningEffort, budgetTokens, chunks); err != nil {
 			errs <- err
@@ -83,6 +82,7 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 		config.ThinkingConfig = tc
 	}
 
+	gotData := false
 	for resp, err := range c.client.Models.GenerateContentStream(ctx, c.model, contents, config) {
 		if err != nil {
 			return fmt.Errorf("stream: %w", err)
@@ -94,12 +94,16 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 			if part.Text == "" {
 				continue
 			}
+			gotData = true
 			if part.Thought {
 				chunks <- StreamChunk{Thinking: part.Text}
 			} else {
 				chunks <- StreamChunk{Content: part.Text}
 			}
 		}
+	}
+	if !gotData {
+		return fmt.Errorf("no response from model %s", c.model)
 	}
 	return nil
 }

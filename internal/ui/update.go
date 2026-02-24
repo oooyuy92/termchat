@@ -279,7 +279,10 @@ func (m Model) readNextChunk() tea.Cmd {
 			}
 			return streamChunkMsg{Content: chunk.Content, Thinking: chunk.Thinking}
 		case err := <-errCh:
-			return streamErrMsg{Err: err}
+			if err != nil {
+				return streamErrMsg{Err: err}
+			}
+			return streamDoneMsg{}
 		}
 	}
 }
