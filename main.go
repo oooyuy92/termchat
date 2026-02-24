@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -11,11 +12,31 @@ import (
 	"github.com/termchat/termchat/internal/ui"
 )
 
-func main() {
-	configPath := config.DefaultConfigPath()
+func parseCLIArgs(args []string) (configPath string, useAltScreen bool, err error) {
+	configPath = config.DefaultConfigPath()
+	useAltScreen = true
 
-	if len(os.Args) > 2 && os.Args[1] == "--config" {
-		configPath = os.Args[2]
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return "", false, errors.New("--config requires a file path")
+			}
+			i++
+			configPath = args[i]
+		case "--no-alt-screen":
+			useAltScreen = false
+		}
+	}
+
+	return configPath, useAltScreen, nil
+}
+
+func main() {
+	configPath, useAltScreen, err := parseCLIArgs(os.Args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 
 	cfg, onboarding, err := config.LoadOrDefault(configPath)
@@ -33,7 +54,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	var opts []tea.ProgramOption
+	if useAltScreen {
+		opts = append(opts, tea.WithAltScreen())
+	}
+	p := tea.NewProgram(model, opts...)
 
 	finalModel, runErr := p.Run()
 	if uiModel, ok := finalModel.(ui.Model); ok {

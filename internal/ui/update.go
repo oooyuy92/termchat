@@ -164,23 +164,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.MouseMsg:
-		if m.mode != modeChat {
-			return m, nil
-		}
-		if msg.Action != tea.MouseActionPress {
-			return m, nil
-		}
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
-			m.scrollChatBy(-3)
-			return m, nil
-		case tea.MouseButtonWheelDown:
-			m.scrollChatBy(3)
-			return m, nil
-		}
-		return m, nil
-
 	case streamChunkMsg:
 		m.currentResp += msg.Content
 		m.currentThinking += msg.Thinking
