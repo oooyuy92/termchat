@@ -315,16 +315,17 @@ func TestGeminiClient_BuildThinkingConfig(t *testing.T) {
 		wantNil         bool
 		checkLevel      bool
 		checkBudget     bool
+		checkThoughts   bool
 	}{
-		{"gemini3 with effort high", "gemini-3.1-pro-preview", "high", 0, false, true, false},
-		{"gemini3 with effort low", "gemini-3-flash-preview", "low", 0, false, true, false},
-		{"gemini3 budget maps to level", "gemini-3-flash-preview", "", 4096, false, true, false},
-		{"gemini3 no config defaults", "gemini-3-flash-preview", "", 0, false, false, false},
-		{"gemini25 with budget", "gemini-2.5-pro", "", 5000, false, false, true},
-		{"gemini25 effort high", "gemini-2.5-pro", "high", 0, false, false, true},
-		{"gemini25 effort low", "gemini-2.5-pro", "low", 0, false, false, true},
-		{"gemini25 no config defaults", "gemini-2.5-pro", "", 0, false, false, false},
-		{"non-thinking model no config", "gemini-2.0-flash", "", 0, true, false, false},
+		{"gemini3 with effort high", "gemini-3.1-pro-preview", "high", 0, false, true, false, true},
+		{"gemini3 with effort low", "gemini-3-flash-preview", "low", 0, false, true, false, true},
+		{"gemini3 budget maps to level", "gemini-3-flash-preview", "", 4096, false, true, false, true},
+		{"gemini3 no config defaults", "gemini-3-flash-preview", "", 0, false, false, false, true},
+		{"gemini25 with budget", "gemini-2.5-pro", "", 5000, false, false, true, true},
+		{"gemini25 effort high", "gemini-2.5-pro", "high", 0, false, false, true, true},
+		{"gemini25 effort low", "gemini-2.5-pro", "low", 0, false, false, true, true},
+		{"gemini25 no config defaults", "gemini-2.5-pro", "", 0, false, false, false, true},
+		{"non-thinking model no config", "gemini-2.0-flash", "", 0, true, false, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -345,6 +346,21 @@ func TestGeminiClient_BuildThinkingConfig(t *testing.T) {
 			if tt.checkBudget && tc.ThinkingBudget == nil {
 				t.Error("expected ThinkingBudget to be set")
 			}
+			if tt.checkThoughts && !tc.IncludeThoughts {
+				t.Error("expected IncludeThoughts to be true")
+			}
 		})
+	}
+}
+
+func TestGeminiClient_ModelAlias(t *testing.T) {
+	c := NewGeminiClient("", "key", "gemini-3.1-pro-preview")
+	if c.Model() != "gemini-3-pro-preview" {
+		t.Fatalf("model alias not normalized: got %q", c.Model())
+	}
+
+	c.SetModel("gemini-3.1-pro-preview")
+	if c.Model() != "gemini-3-pro-preview" {
+		t.Fatalf("set model alias not normalized: got %q", c.Model())
 	}
 }

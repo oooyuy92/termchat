@@ -34,7 +34,7 @@ type GeminiClient struct {
 }
 
 func NewGeminiClient(baseURL, apiKey, model string) *GeminiClient {
-	g := &GeminiClient{apiKey: apiKey, model: model}
+	g := &GeminiClient{apiKey: apiKey, model: canonicalGeminiModel(model)}
 	g.initClient()
 	return g
 }
@@ -50,7 +50,7 @@ func (c *GeminiClient) initClient() {
 }
 
 func (c *GeminiClient) Model() string     { return c.model }
-func (c *GeminiClient) SetModel(m string) { c.model = m }
+func (c *GeminiClient) SetModel(m string) { c.model = canonicalGeminiModel(m) }
 func (c *GeminiClient) BaseURL() string   { return "https://generativelanguage.googleapis.com" }
 func (c *GeminiClient) APIKey() string    { return c.apiKey }
 
@@ -98,7 +98,7 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 	if tc := c.buildThinkingConfig(reasoningEffort, budgetTokens); tc != nil {
 		config.ThinkingConfig = tc
 		if geminiDebugLogger != nil {
-			geminiDebugLogger.Printf("ThinkingConfig: Level=%q Budget=%v", tc.ThinkingLevel, tc.ThinkingBudget)
+			geminiDebugLogger.Printf("ThinkingConfig: Level=%q Budget=%v IncludeThoughts=%v", tc.ThinkingLevel, tc.ThinkingBudget, tc.IncludeThoughts)
 		}
 	}
 
@@ -172,7 +172,8 @@ func (c *GeminiClient) buildContents(messages []Message) ([]*genai.Content, *gen
 // buildThinkingConfig returns the appropriate thinking config for the model.
 // Gemini 3.x uses ThinkingLevel; Gemini 2.5 uses ThinkingBudget.
 func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens int) *genai.ThinkingConfig {
-	if strings.Contains(c.model, "gemini-3") {
+	model := strings.ToLower(c.model)
+	if strings.Contains(model, "gemini-3") {
 		level := mapThinkingLevel(reasoningEffort)
 		if level == "" && budgetTokens > 0 {
 			switch {
@@ -186,11 +187,14 @@ func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens 
 		}
 		if level != "" {
 			tl := genai.ThinkingLevel(level)
-			return &genai.ThinkingConfig{ThinkingLevel: tl}
+			return &genai.ThinkingConfig{
+				ThinkingLevel:  tl,
+				IncludeThoughts: true,
+			}
 		}
 		// Thinking is on by default for Gemini 3; return empty config
 		// so that thought parts are included in the streaming response.
-		return &genai.ThinkingConfig{}
+		return &genai.ThinkingConfig{IncludeThoughts: true}
 	}
 
 	// Gemini 2.5: use ThinkingBudget.
@@ -207,14 +211,28 @@ func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens 
 	}
 	if budgetTokens > 0 {
 		b := int32(budgetTokens)
-		return &genai.ThinkingConfig{ThinkingBudget: &b}
+		return &genai.ThinkingConfig{
+			ThinkingBudget: &b,
+			IncludeThoughts: true,
+		}
 	}
 	// For 2.5 thinking models, enable thinking with default budget
 	// so that thought parts are included in the streaming response.
-	if strings.Contains(c.model, "2.5") {
-		return &genai.ThinkingConfig{}
+	if strings.Contains(model, "2.5") {
+		return &genai.ThinkingConfig{IncludeThoughts: true}
 	}
 	return nil
+}
+
+func canonicalGeminiModel(model string) string {
+	trimmed := strings.TrimSpace(model)
+	switch strings.ToLower(trimmed) {
+	case "gemini-3.1-pro-preview":
+		// Marketing name is "Gemini 3.1 Pro Preview", but API model code is gemini-3-pro-preview.
+		return "gemini-3-pro-preview"
+	default:
+		return trimmed
+	}
 }
 
 func truncate(s string, n int) string {

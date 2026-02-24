@@ -19,7 +19,7 @@ func buildConfigFields(cfg config.Config) []configField {
 		{Label: "Model", Key: "model", Value: cfg.API.Model},
 		{Label: "Temperature", Key: "temperature", Value: fmt.Sprintf("%.2f", cfg.Parameters.Temperature)},
 		{Label: "Max Tokens", Key: "max_tokens", Value: strconv.Itoa(cfg.Parameters.MaxTokens)},
-		{Label: "Reasoning Effort", Key: "reasoning_effort", Value: cfg.Parameters.ReasoningEffort, Options: []string{"", "low", "medium", "high"}},
+		{Label: "Reasoning Effort", Key: "reasoning_effort", Value: cfg.Parameters.ReasoningEffort, Options: []string{"", "minimal", "low", "medium", "high"}},
 		{Label: "Budget Tokens", Key: "budget_tokens", Value: strconv.Itoa(cfg.Parameters.BudgetTokens)},
 		{Label: "Theme", Key: "theme", Value: cfg.Settings.Theme, Options: []string{"dark", "light"}},
 	}
@@ -71,8 +71,8 @@ func validateField(key, value string) string {
 		}
 	case "reasoning_effort":
 		v := strings.ToLower(strings.TrimSpace(value))
-		if v != "" && v != "low" && v != "medium" && v != "high" {
-			return "must be low, medium, high, or empty"
+		if v != "" && v != "minimal" && v != "low" && v != "medium" && v != "high" {
+			return "must be minimal, low, medium, high, or empty"
 		}
 	case "budget_tokens":
 		n, err := strconv.Atoi(value)
