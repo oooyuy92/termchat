@@ -155,17 +155,35 @@ func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens 
 				level = string(genai.ThinkingLevelHigh)
 			}
 		}
-		if level == "" {
-			return nil
+		if level != "" {
+			tl := genai.ThinkingLevel(level)
+			return &genai.ThinkingConfig{ThinkingLevel: tl}
 		}
-		tl := genai.ThinkingLevel(level)
-		return &genai.ThinkingConfig{ThinkingLevel: tl}
+		// Thinking is on by default for Gemini 3; return empty config
+		// so that thought parts are included in the streaming response.
+		return &genai.ThinkingConfig{}
 	}
 
-	// Gemini 2.5: use ThinkingBudget
+	// Gemini 2.5: use ThinkingBudget.
+	// Map reasoningEffort to a budget when no explicit budget is set.
+	if budgetTokens <= 0 && reasoningEffort != "" {
+		switch strings.ToLower(reasoningEffort) {
+		case "low":
+			budgetTokens = 1024
+		case "medium":
+			budgetTokens = 8192
+		case "high":
+			budgetTokens = 24576
+		}
+	}
 	if budgetTokens > 0 {
 		b := int32(budgetTokens)
 		return &genai.ThinkingConfig{ThinkingBudget: &b}
+	}
+	// For 2.5 thinking models, enable thinking with default budget
+	// so that thought parts are included in the streaming response.
+	if strings.Contains(c.model, "2.5") {
+		return &genai.ThinkingConfig{}
 	}
 	return nil
 }
