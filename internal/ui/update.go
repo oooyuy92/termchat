@@ -50,6 +50,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.streaming {
+			if m.handleChatScrollKey(msg.String()) {
+				return m, nil
+			}
 			if msg.String() == "ctrl+c" {
 				if m.confirmQuit {
 					return m, tea.Quit
@@ -78,6 +81,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "up", "down", "pgup", "pgdown", "home", "end":
+			m.handleChatScrollKey(msg.String())
+			return m, nil
+
 		case "esc":
 			m.escCount++
 			if m.escCount >= 2 {
@@ -115,6 +122,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.Add(chat.Message{Role: "user", Content: input, Images: m.pendingImages})
 			m.pendingImages = nil
 			m.streaming = true
+			m.chatFollowBottom = true
 			m.currentResp = ""
 			m.currentThinking = ""
 			m.err = nil
@@ -146,6 +154,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+		}
+		return m, nil
+
+	case tea.MouseMsg:
+		if m.mode != modeChat {
+			return m, nil
+		}
+		if msg.Action != tea.MouseActionPress {
+			return m, nil
+		}
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.scrollChatBy(-3)
+			return m, nil
+		case tea.MouseButtonWheelDown:
+			m.scrollChatBy(3)
+			return m, nil
 		}
 		return m, nil
 
@@ -246,6 +271,71 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) maxChatScrollTop() int {
+	return m.maxChatScrollForContent(m.buildChatContent())
+}
+
+func (m *Model) scrollChatBy(delta int) bool {
+	maxTop := m.maxChatScrollTop()
+	if maxTop == 0 {
+		m.chatScrollTop = 0
+		m.chatFollowBottom = true
+		return false
+	}
+
+	oldTop := m.chatScrollTop
+	oldFollow := m.chatFollowBottom
+
+	m.chatFollowBottom = false
+	m.chatScrollTop += delta
+	if m.chatScrollTop < 0 {
+		m.chatScrollTop = 0
+	}
+	if m.chatScrollTop > maxTop {
+		m.chatScrollTop = maxTop
+	}
+	if m.chatScrollTop == maxTop {
+		m.chatFollowBottom = true
+	}
+	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
+}
+
+func (m *Model) scrollChatToTop() bool {
+	oldTop := m.chatScrollTop
+	oldFollow := m.chatFollowBottom
+	m.chatScrollTop = 0
+	m.chatFollowBottom = false
+	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
+}
+
+func (m *Model) scrollChatToBottom() bool {
+	maxTop := m.maxChatScrollTop()
+	oldTop := m.chatScrollTop
+	oldFollow := m.chatFollowBottom
+	m.chatScrollTop = maxTop
+	m.chatFollowBottom = true
+	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
+}
+
+func (m *Model) handleChatScrollKey(key string) bool {
+	switch key {
+	case "up":
+		return m.scrollChatBy(-1)
+	case "down":
+		return m.scrollChatBy(1)
+	case "pgup":
+		return m.scrollChatBy(-(m.chatViewportHeight() - 1))
+	case "pgdown":
+		return m.scrollChatBy(m.chatViewportHeight() - 1)
+	case "home":
+		return m.scrollChatToTop()
+	case "end":
+		return m.scrollChatToBottom()
+	default:
+		return false
+	}
+}
+
 func (m Model) sendStreamCmd(ctx context.Context) tea.Cmd {
 	messages := m.history.ToAPIMessages()
 	client := m.client
@@ -325,6 +415,8 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		m.totalTokens = 0
 		m.pendingImages = nil
 		m.imageCounter = 0
+		m.chatScrollTop = 0
+		m.chatFollowBottom = true
 		m.statusMsg = "Conversation cleared"
 		return m, nil
 

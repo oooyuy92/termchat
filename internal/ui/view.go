@@ -29,6 +29,115 @@ func cleanGlamourOutput(s string) string {
 	return s
 }
 
+func (m Model) chatViewportHeight() int {
+	// Keep one line for the status bar.
+	h := m.height - 1
+	if h < 1 {
+		return 1
+	}
+	return h
+}
+
+func (m Model) maxChatScrollForContent(content string) int {
+	totalLines := strings.Count(content, "\n") + 1
+	viewportHeight := m.chatViewportHeight()
+	if totalLines <= viewportHeight {
+		return 0
+	}
+	return totalLines - viewportHeight
+}
+
+func (m Model) renderChatViewport(content string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+
+	viewportHeight := m.chatViewportHeight()
+	maxTop := m.maxChatScrollForContent(content)
+
+	top := m.chatScrollTop
+	if m.chatFollowBottom {
+		top = maxTop
+	}
+	if top < 0 {
+		top = 0
+	}
+	if top > maxTop {
+		top = maxTop
+	}
+
+	end := top + viewportHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if end < top {
+		end = top
+	}
+	return strings.Join(lines[top:end], "\n")
+}
+
+func (m Model) buildChatContent() string {
+	var b strings.Builder
+
+	// Render conversation history.
+	for _, msg := range m.history.Messages() {
+		switch msg.Role {
+		case "user":
+			b.WriteString(m.theme.UserLabelStyle().Render("You:") + "\n")
+			b.WriteString(msg.Content + "\n\n")
+		case "assistant":
+			b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
+			rendered, err := m.renderer.Render(msg.Content)
+			if err != nil {
+				b.WriteString(msg.Content + "\n\n")
+			} else {
+				cleaned := cleanGlamourOutput(rendered)
+				// Hard-wrap long lines (e.g. Chinese text with no spaces) that
+				// glamour's word-wrapper cannot break at word boundaries.
+				if m.width > 0 {
+					cleaned = wrap.String(cleaned, m.width)
+				}
+				b.WriteString(cleaned + "\n\n")
+			}
+		}
+	}
+
+	// Render current streaming response.
+	if m.streaming {
+		b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
+		if m.currentThinking != "" {
+			thinking := strings.ReplaceAll(strings.TrimSpace(m.currentThinking), "\n\n", "\n")
+			b.WriteString(m.theme.ThinkingStyle().Render("\U0001f4ad "+thinking) + "\n")
+		}
+		if m.currentResp != "" {
+			rendered, err := m.renderer.Render(m.currentResp)
+			if err != nil {
+				b.WriteString(m.currentResp)
+			} else {
+				cleaned := cleanGlamourOutput(rendered)
+				if m.width > 0 {
+					cleaned = wrap.String(cleaned, m.width)
+				}
+				b.WriteString(cleaned + "\n")
+			}
+		}
+		b.WriteString("\u2588\n")
+	}
+
+	// Render error.
+	if m.err != nil {
+		b.WriteString(m.theme.ErrStyle().Render(fmt.Sprintf("Error: %v", m.err)) + "\n")
+	}
+
+	// Input area.
+	if !m.streaming {
+		b.WriteString(m.theme.InputPromptStyle().Render("> ") + m.input)
+	}
+
+	return b.String()
+}
+
 func (m Model) View() string {
 	if m.mode == modeConfig {
 		return m.viewConfigEditor()
@@ -55,63 +164,6 @@ func (m Model) View() string {
 		return m.viewMessageBrowse()
 	}
 
-	var b strings.Builder
-
-	// Render conversation history
-	for _, msg := range m.history.Messages() {
-		switch msg.Role {
-		case "user":
-			b.WriteString(m.theme.UserLabelStyle().Render("You:") + "\n")
-			b.WriteString(msg.Content + "\n\n")
-		case "assistant":
-			b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
-			rendered, err := m.renderer.Render(msg.Content)
-			if err != nil {
-				b.WriteString(msg.Content + "\n\n")
-			} else {
-				cleaned := cleanGlamourOutput(rendered)
-				// Hard-wrap long lines (e.g. Chinese text with no spaces) that
-				// glamour's word-wrapper cannot break at word boundaries.
-				if m.width > 0 {
-					cleaned = wrap.String(cleaned, m.width)
-				}
-				b.WriteString(cleaned + "\n\n")
-			}
-		}
-	}
-
-	// Render current streaming response
-	if m.streaming {
-		b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
-		if m.currentThinking != "" {
-			thinking := strings.ReplaceAll(strings.TrimSpace(m.currentThinking), "\n\n", "\n")
-			b.WriteString(m.theme.ThinkingStyle().Render("\U0001f4ad "+thinking) + "\n")
-		}
-		if m.currentResp != "" {
-			rendered, err := m.renderer.Render(m.currentResp)
-			if err != nil {
-				b.WriteString(m.currentResp)
-			} else {
-				cleaned := cleanGlamourOutput(rendered)
-				if m.width > 0 {
-					cleaned = wrap.String(cleaned, m.width)
-				}
-				b.WriteString(cleaned + "\n")
-			}
-		}
-		b.WriteString("\u2588\n")
-	}
-
-	// Render error
-	if m.err != nil {
-		b.WriteString(m.theme.ErrStyle().Render(fmt.Sprintf("Error: %v", m.err)) + "\n")
-	}
-
-	// Input area
-	if !m.streaming {
-		b.WriteString(m.theme.InputPromptStyle().Render("> ") + m.input)
-	}
-
-	content := b.String()
-	return content + "\n" + m.renderStatusBar()
+	content := m.buildChatContent()
+	return m.renderChatViewport(content) + "\n" + m.renderStatusBar()
 }

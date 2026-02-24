@@ -33,7 +33,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	finalModel, runErr := p.Run()
 	if uiModel, ok := finalModel.(ui.Model); ok {

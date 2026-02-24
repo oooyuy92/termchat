@@ -173,32 +173,34 @@ type Model struct {
 	streamCtrl *streamControl
 
 	// UI state
-	mode            uiMode
-	configEd        configEditor
-	resumePick      resumePicker
-	shortcutsPath   string
-	shortcutEd      shortcutEditor
-	rolesPath       string
-	roleEd          roleEditor
-	rolePick        rolePicker
-	activeRole      string // name of the selected role; shown in status bar
-	cfgPath         string
-	autoSaveName    string
-	input           string
-	pendingImages   []chat.ImageData
-	imageCounter    int
-	slashAC         slashComplete
-	escCount        int // consecutive Esc presses in chat mode for double-Esc detection
-	browseCursor    int // index of selected message in modeMessageBrowse
-	streaming       bool
-	confirmQuit     bool
-	currentResp     string
-	currentThinking string
-	statusMsg       string
-	totalTokens     int
-	width           int
-	height          int
-	err             error
+	mode             uiMode
+	configEd         configEditor
+	resumePick       resumePicker
+	shortcutsPath    string
+	shortcutEd       shortcutEditor
+	rolesPath        string
+	roleEd           roleEditor
+	rolePick         rolePicker
+	activeRole       string // name of the selected role; shown in status bar
+	cfgPath          string
+	autoSaveName     string
+	input            string
+	pendingImages    []chat.ImageData
+	imageCounter     int
+	slashAC          slashComplete
+	escCount         int // consecutive Esc presses in chat mode for double-Esc detection
+	browseCursor     int // index of selected message in modeMessageBrowse
+	streaming        bool
+	confirmQuit      bool
+	currentResp      string
+	currentThinking  string
+	statusMsg        string
+	totalTokens      int
+	width            int
+	height           int
+	chatScrollTop    int
+	chatFollowBottom bool
+	err              error
 }
 
 func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
@@ -267,19 +269,20 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Pr
 	}
 
 	return Model{
-		cfg:           cfg,
-		client:        client,
-		history:       chat.NewHistory(),
-		store:         store,
-		renderer:      renderer,
-		cfgPath:       cfgPath,
-		shortcutsPath: shortcutsPath,
-		theme:         ThemeByName(cfg.Settings.Theme),
-		autoSaveName:  time.Now().Format("2006-01-02_150405"),
-		mode:          initialMode,
-		rolesPath:     rolesPath,
-		rolePick:      rolePick,
-		configEd:      initConfigEd,
+		cfg:              cfg,
+		client:           client,
+		history:          chat.NewHistory(),
+		store:            store,
+		renderer:         renderer,
+		cfgPath:          cfgPath,
+		shortcutsPath:    shortcutsPath,
+		theme:            ThemeByName(cfg.Settings.Theme),
+		autoSaveName:     time.Now().Format("2006-01-02_150405"),
+		mode:             initialMode,
+		rolesPath:        rolesPath,
+		rolePick:         rolePick,
+		configEd:         initConfigEd,
+		chatFollowBottom: true,
 	}, nil
 }
 
@@ -299,4 +302,3 @@ func (m *Model) recreateRenderer(width int) {
 		m.renderer = r
 	}
 }
-
