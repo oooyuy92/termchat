@@ -4,10 +4,27 @@ package chat
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 
 	"google.golang.org/genai"
 )
+
+// debugLog writes diagnostic info to ~/.config/termchat/gemini_debug.log
+// when the TERMCHAT_DEBUG environment variable is set.
+var geminiDebugLogger = func() *log.Logger {
+	if os.Getenv("TERMCHAT_DEBUG") == "" {
+		return nil
+	}
+	home, _ := os.UserHomeDir()
+	f, err := os.OpenFile(home+"/.config/termchat/gemini_debug.log",
+		os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil
+	}
+	return log.New(f, "", log.LstdFlags)
+}()
 
 // GeminiClient implements Provider for the Google Gemini API using the official SDK.
 type GeminiClient struct {
@@ -80,17 +97,29 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 
 	if tc := c.buildThinkingConfig(reasoningEffort, budgetTokens); tc != nil {
 		config.ThinkingConfig = tc
+		if geminiDebugLogger != nil {
+			geminiDebugLogger.Printf("ThinkingConfig: Level=%q Budget=%v", tc.ThinkingLevel, tc.ThinkingBudget)
+		}
 	}
 
 	gotData := false
+	partIdx := 0
 	for resp, err := range c.client.Models.GenerateContentStream(ctx, c.model, contents, config) {
 		if err != nil {
 			return fmt.Errorf("stream: %w", err)
 		}
 		if resp == nil || len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+			if geminiDebugLogger != nil {
+				geminiDebugLogger.Printf("chunk: empty response (resp=%v)", resp != nil)
+			}
 			continue
 		}
 		for _, part := range resp.Candidates[0].Content.Parts {
+			if geminiDebugLogger != nil {
+				geminiDebugLogger.Printf("part[%d]: Thought=%v Text=%q (len=%d) ThoughtSig=%d",
+					partIdx, part.Thought, truncate(part.Text, 80), len(part.Text), len(part.ThoughtSignature))
+				partIdx++
+			}
 			if part.Text == "" {
 				continue
 			}
@@ -186,6 +215,14 @@ func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens 
 		return &genai.ThinkingConfig{}
 	}
 	return nil
+}
+
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
 }
 
 func mapThinkingLevel(effort string) string {
