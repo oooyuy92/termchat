@@ -4,6 +4,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -143,7 +144,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		default:
 			if msg.Type == tea.KeyRunes {
-				m.input += string(msg.Runes)
+				raw := string(msg.Runes)
+				// Some terminal/tmux combinations leak SGR mouse bytes as runes
+				// (e.g. "<65;43;25M"). Swallow them so they don't pollute input.
+				if m.handleMouseFallbackRunes(raw) {
+					return m, nil
+				}
+				m.input += raw
 				// Enter slash autocomplete mode when "/" is typed as the first character
 				if m.input == "/" {
 					m.mode = modeSlashComplete
@@ -269,6 +276,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// handleMouseFallbackRunes parses mouse SGR fragments that may arrive as text
+// and converts wheel events into chat scrolling.
+func (m *Model) handleMouseFallbackRunes(raw string) bool {
+	handled := false
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '<' {
+			continue
+		}
+		j := i + 1
+		for j < len(raw) {
+			c := raw[j]
+			if (c >= '0' && c <= '9') || c == ';' {
+				j++
+				continue
+			}
+			break
+		}
+		if j >= len(raw) || (raw[j] != 'M' && raw[j] != 'm') || j == i+1 {
+			continue
+		}
+
+		parts := strings.Split(raw[i+1:j], ";")
+		if len(parts) != 3 {
+			handled = true
+			i = j
+			continue
+		}
+		btn, err := strconv.Atoi(parts[0])
+		if err == nil {
+			// xterm mouse encoding puts modifiers on top of base button code.
+			baseBtn := btn &^ (4 | 8 | 16)
+			switch baseBtn {
+			case 64:
+				m.scrollChatBy(-3)
+			case 65:
+				m.scrollChatBy(3)
+			}
+		}
+		handled = true
+		i = j
+	}
+	return handled
 }
 
 func (m Model) maxChatScrollTop() int {
