@@ -105,7 +105,7 @@ func (m Model) viewResumePicker() string {
 	var b strings.Builder
 	p := m.resumePick
 
-	b.WriteString(m.theme.ConfigTitleStyle().Render("Resume a Conversation"))
+	b.WriteString(m.theme.ConfigTitleStyle().Render("Conversation History"))
 	b.WriteString("\n\n")
 
 	if len(p.groups) == 0 {

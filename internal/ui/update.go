@@ -468,7 +468,7 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		m.statusMsg = "Model set to " + parts[1]
 		return m, m.saveConfigCmd()
 
-	case "/resume":
+	case "/history":
 		convs, err := m.store.ListWithDate()
 		if err != nil {
 			m.statusMsg = "Failed to load conversations: " + err.Error()

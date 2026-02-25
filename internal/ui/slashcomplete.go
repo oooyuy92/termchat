@@ -23,7 +23,7 @@ type slashComplete struct {
 var slashCmds = []slashCmd{
 	{"/clear", "Clear conversation"},
 	{"/exit", "Quit termchat"},
-	{"/resume", "Browse conversations by date"},
+	{"/history", "Conversation history"},
 	{"/roles", "Edit role presets"},
 	{"/settings", "Model & parameters"},
 	{"/shortcuts", "Edit keyboard shortcuts"},
