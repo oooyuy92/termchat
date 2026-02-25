@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/export"
 	"github.com/termchat/termchat/internal/storage"
 )
@@ -140,10 +141,18 @@ func (m Model) updateExportPick(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "enter":
 		p.exporting = false
 		conv := p.groups[p.dateIdx].convs[p.convIdx]
-		msgs, err := m.store.Load(conv.Name)
-		if err != nil {
-			m.statusMsg = "Export failed: " + err.Error()
-			return m, nil
+		// If exporting the currently active conversation, use in-memory history
+		// to avoid missing the last message (autoSave is async).
+		var msgs []chat.Message
+		if conv.Name == m.autoSaveName {
+			msgs = m.history.Messages()
+		} else {
+			var err error
+			msgs, err = m.store.Load(conv.Name)
+			if err != nil {
+				m.statusMsg = "Export failed: " + err.Error()
+				return m, nil
+			}
 		}
 		exts := []string{"txt", "md", "pdf"}
 		ext := exts[p.exportFmt]

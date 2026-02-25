@@ -19,11 +19,16 @@ var cjkFont []byte
 func ExportTxt(path string, msgs []chat.Message) error {
 	var b strings.Builder
 	for _, m := range msgs {
-		role := "User"
-		if m.Role == "assistant" {
-			role = "Assistant"
+		var label string
+		switch m.Role {
+		case "user":
+			label = "You"
+		case "assistant":
+			label = "AI"
+		default:
+			continue // skip system and other roles
 		}
-		fmt.Fprintf(&b, "[%s]: %s\n\n", role, m.Content)
+		fmt.Fprintf(&b, "[%s]: %s\n\n", label, m.Content)
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
@@ -32,9 +37,14 @@ func ExportTxt(path string, msgs []chat.Message) error {
 func ExportMd(path string, msgs []chat.Message) error {
 	var b strings.Builder
 	for _, m := range msgs {
-		heading := "## User"
-		if m.Role == "assistant" {
-			heading = "## Assistant"
+		var heading string
+		switch m.Role {
+		case "user":
+			heading = "## You"
+		case "assistant":
+			heading = "## AI"
+		default:
+			continue // skip system and other roles
 		}
 		fmt.Fprintf(&b, "%s\n\n%s\n\n", heading, m.Content)
 	}
@@ -100,15 +110,20 @@ func ExportPdf(path string, msgs []chat.Message) error {
 	pdf.SetY(margin)
 
 	for _, m := range msgs {
-		role := "User"
-		if m.Role == "assistant" {
-			role = "Assistant"
+		var label string
+		switch m.Role {
+		case "user":
+			label = "You"
+		case "assistant":
+			label = "AI"
+		default:
+			continue // skip system and other roles
 		}
 		// Role label
 		if err := pdf.SetFont("CJK", "", 13); err != nil {
 			return err
 		}
-		if err := pdf.Cell(nil, role); err != nil {
+		if err := pdf.Cell(nil, label); err != nil {
 			return err
 		}
 		pdf.Br(18)
