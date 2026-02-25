@@ -2,3 +2,4 @@ termchat
 *.exe
 config.yaml
 docs/
+.worktrees/
