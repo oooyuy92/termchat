@@ -4,7 +4,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/ui"
-	"golang.org/x/term"
 )
 
 func parseCLIArgs(args []string) (configPath string, noAltScreen bool, err error) {
@@ -48,17 +46,6 @@ func resolveAltScreenMode(noAltScreen bool, mode string) bool {
 	}
 }
 
-func setAlternateScroll(w io.Writer, enabled bool) {
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return
-	}
-	if enabled {
-		_, _ = io.WriteString(w, "\x1b[?1007h")
-		return
-	}
-	_, _ = io.WriteString(w, "\x1b[?1007l")
-}
-
 func main() {
 	configPath, noAltScreen, err := parseCLIArgs(os.Args)
 	if err != nil {
@@ -86,11 +73,8 @@ func main() {
 	var opts []tea.ProgramOption
 	if useAltScreen {
 		opts = append(opts, tea.WithAltScreen())
-		setAlternateScroll(os.Stdout, true)
-		defer setAlternateScroll(os.Stdout, false)
-	} else {
-		opts = append(opts, tea.WithMouseCellMotion())
 	}
+	opts = append(opts, tea.WithMouseCellMotion())
 	p := tea.NewProgram(model, opts...)
 
 	finalModel, runErr := p.Run()
