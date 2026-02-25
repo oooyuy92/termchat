@@ -12,8 +12,8 @@ import (
 	"github.com/termchat/termchat/internal/chat"
 )
 
-//go:embed fonts/NotoSansSC-Regular.ttf
-var notoSansSC []byte
+//go:embed fonts/DroidSansFallback.ttf
+var cjkFont []byte
 
 // ExportTxt writes messages to path as plain text.
 func ExportTxt(path string, msgs []chat.Message) error {
@@ -67,7 +67,7 @@ func ResolvePath(exportDir, convName, ext string) (string, error) {
 func ExportPdf(path string, msgs []chat.Message) error {
 	pdf := gopdf.GoPdf{}
 	pdf.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4, Unit: gopdf.UnitPT})
-	if err := pdf.AddTTFFontData("NotoSansSC", notoSansSC); err != nil {
+	if err := pdf.AddTTFFontData("CJK", cjkFont); err != nil {
 		return fmt.Errorf("load font: %w", err)
 	}
 
@@ -85,7 +85,7 @@ func ExportPdf(path string, msgs []chat.Message) error {
 			role = "Assistant"
 		}
 		// Role label
-		if err := pdf.SetFont("NotoSansSC", "", 13); err != nil {
+		if err := pdf.SetFont("CJK", "", 13); err != nil {
 			return err
 		}
 		if err := pdf.Cell(nil, role); err != nil {
@@ -94,7 +94,7 @@ func ExportPdf(path string, msgs []chat.Message) error {
 		pdf.Br(18)
 		pdf.SetX(margin)
 		// Content
-		if err := pdf.SetFont("NotoSansSC", "", 11); err != nil {
+		if err := pdf.SetFont("CJK", "", 11); err != nil {
 			return err
 		}
 		if err := pdf.MultiCell(&gopdf.Rect{W: textW, H: 15}, m.Content); err != nil {
