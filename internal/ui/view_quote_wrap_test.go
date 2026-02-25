@@ -173,7 +173,7 @@ func TestBuildChatContentLeavesHeadroomToAvoidTerminalSoftWrap(t *testing.T) {
 			maxWidth = w
 		}
 	}
-	if maxWidth > width-2 {
-		t.Fatalf("line width %d exceeds safe headroom width %d", maxWidth, width-2)
+	if maxWidth > width-6 {
+		t.Fatalf("line width %d exceeds safe headroom width %d", maxWidth, width-6)
 	}
 }

@@ -293,7 +293,9 @@ func (m *Model) recreateRenderer(width int) {
 }
 
 func markdownWrapWidth(termWidth int) int {
-	const safetyMargin = 2
+	// Keep extra headroom to avoid terminal soft-wrap drift on mixed CJK/ASCII
+	// content (notably in macOS Terminal.app).
+	const safetyMargin = 6
 	if termWidth <= 0 {
 		return 80
 	}

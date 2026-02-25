@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func (m Model) renderStatusBar() string {
@@ -20,6 +21,10 @@ func (m Model) renderStatusBar() string {
 
 	if m.statusMsg != "" {
 		status += "  " + m.theme.StatusBarStyle().Render(m.statusMsg)
+	}
+	if m.width > 0 {
+		// Keep status bar to a single terminal line so it doesn't steal chat rows.
+		status = xansi.TruncateWc(status, m.width, "")
 	}
 
 	bar := lipgloss.NewStyle().
