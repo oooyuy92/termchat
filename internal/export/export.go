@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-pdf/fpdf"
+	"github.com/signintech/gopdf"
 	"github.com/termchat/termchat/internal/chat"
 )
 
@@ -65,29 +65,44 @@ func ResolvePath(exportDir, convName, ext string) (string, error) {
 
 // ExportPdf writes messages to path as a PDF with CJK font support.
 func ExportPdf(path string, msgs []chat.Message) error {
-	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.AddUTF8FontFromBytes("NotoSansSC", "", notoSansSC)
-	pdf.SetFont("NotoSansSC", "", 11)
-	pdf.AddPage()
+	pdf := gopdf.GoPdf{}
+	pdf.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4, Unit: gopdf.UnitPT})
+	if err := pdf.AddTTFFontData("NotoSansSC", notoSansSC); err != nil {
+		return fmt.Errorf("load font: %w", err)
+	}
 
-	lineH := 6.0
-	pageW, _, _ := pdf.PageSize(0)
-	margin := 15.0
-	textW := pageW - 2*margin
-	pdf.SetMargins(margin, margin, margin)
-	pdf.SetAutoPageBreak(true, margin)
+	margin := 40.0
+	textW := gopdf.PageSizeA4.W - 2*margin
+
+	pdf.AddPage()
+	pdf.SetMargins(margin, margin, margin, margin)
+	pdf.SetX(margin)
+	pdf.SetY(margin)
 
 	for _, m := range msgs {
 		role := "User"
 		if m.Role == "assistant" {
 			role = "Assistant"
 		}
-		pdf.SetFont("NotoSansSC", "", 12)
-		pdf.MultiCell(textW, lineH, role, "", "L", false)
-		pdf.SetFont("NotoSansSC", "", 11)
-		pdf.MultiCell(textW, lineH, m.Content, "", "L", false)
-		pdf.Ln(4)
+		// Role label
+		if err := pdf.SetFont("NotoSansSC", "", 13); err != nil {
+			return err
+		}
+		if err := pdf.Cell(nil, role); err != nil {
+			return err
+		}
+		pdf.Br(18)
+		pdf.SetX(margin)
+		// Content
+		if err := pdf.SetFont("NotoSansSC", "", 11); err != nil {
+			return err
+		}
+		if err := pdf.MultiCell(&gopdf.Rect{W: textW, H: 15}, m.Content); err != nil {
+			return err
+		}
+		pdf.Br(10)
+		pdf.SetX(margin)
 	}
 
-	return pdf.OutputFileAndClose(path)
+	return pdf.WritePdf(path)
 }
