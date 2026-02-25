@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/muesli/reflow/wrap"
 )
@@ -109,7 +110,6 @@ func (m Model) buildChatContent() string {
 				b.WriteString(cleaned + "\n")
 			}
 		}
-		b.WriteString("\u2588\n")
 	}
 
 	// Render error.
@@ -146,8 +146,34 @@ func (m Model) View() string {
 		return m.viewMessageBrowse()
 	}
 
+	statusBar := m.renderStatusBar()
+	inputArea := m.textarea.View()
+
+	// Spinner line: shown only during streaming
+	spinnerLine := ""
 	if m.streaming {
-		return m.viewport.View() + "\n" + m.renderStatusBar()
+		spinnerLine = m.theme.SpinnerStyle().Render(m.spinner.View() + " 生成中...")
 	}
-	return m.viewport.View() + "\n" + m.theme.InputPromptStyle().Render("> ") + m.input + "\n" + m.renderStatusBar()
+
+	// Dynamic viewport height
+	vpHeight := m.height - lipgloss.Height(statusBar) - lipgloss.Height(inputArea)
+	if spinnerLine != "" {
+		vpHeight -= lipgloss.Height(spinnerLine)
+	}
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	if m.viewport.Height != vpHeight {
+		m.viewport.Height = vpHeight
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
+		}
+	}
+
+	parts := []string{m.viewport.View()}
+	if spinnerLine != "" {
+		parts = append(parts, spinnerLine)
+	}
+	parts = append(parts, inputArea, statusBar)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

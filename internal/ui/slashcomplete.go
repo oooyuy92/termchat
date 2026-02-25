@@ -78,7 +78,7 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc":
-		m.input = ""
+		m.textarea.SetValue("")
 		m.mode = modeChat
 		return m, nil
 
@@ -103,7 +103,7 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "tab":
 		// Fill selected command name into input, return to chat to edit args
 		if len(m.slashAC.matches) > 0 {
-			m.input = m.slashAC.matches[m.slashAC.cursor].Name
+			m.textarea.SetValue(m.slashAC.matches[m.slashAC.cursor].Name)
 		}
 		m.mode = modeChat
 		return m, nil
@@ -112,7 +112,7 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Execute selected command immediately
 		if len(m.slashAC.matches) > 0 {
 			cmd := m.slashAC.matches[m.slashAC.cursor].Name
-			m.input = ""
+			m.textarea.SetValue("")
 			m.mode = modeChat
 			newModel, teaCmd := m.handleCommand(cmd)
 			if updated, ok := newModel.(Model); ok {
@@ -124,15 +124,16 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "backspace":
-		runes := []rune(m.input)
+		val := m.textarea.Value()
+		runes := []rune(val)
 		if len(runes) > 0 {
-			m.input = string(runes[:len(runes)-1])
+			m.textarea.SetValue(string(runes[:len(runes)-1]))
 		}
-		if m.input == "" {
+		if m.textarea.Value() == "" {
 			m.mode = modeChat
 			return m, nil
 		}
-		m.slashAC.matches = filterSlashCmds(m.input)
+		m.slashAC.matches = filterSlashCmds(m.textarea.Value())
 		if len(m.slashAC.matches) == 0 {
 			m.mode = modeChat
 			return m, nil
@@ -147,8 +148,8 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if msg.Type != tea.KeyRunes {
 			return m, nil
 		}
-		m.input += string(msg.Runes)
-		m.slashAC.matches = filterSlashCmds(m.input)
+		m.textarea.SetValue(m.textarea.Value() + string(msg.Runes))
+		m.slashAC.matches = filterSlashCmds(m.textarea.Value())
 		if len(m.slashAC.matches) == 0 {
 			// No matches — fall back to chat mode
 			m.mode = modeChat
@@ -201,7 +202,7 @@ func (m Model) viewSlashComplete() string {
 	}
 
 	// Input line
-	b.WriteString(m.theme.InputPromptStyle().Render("> ") + m.input)
+	b.WriteString(m.theme.InputPromptStyle().Render("> ") + m.textarea.Value())
 
 	return b.String() + "\n" + m.renderStatusBar()
 }

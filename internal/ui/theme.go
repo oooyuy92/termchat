@@ -146,3 +146,8 @@ func (t Theme) StatusKeyStyle() lipgloss.Style {
 		Foreground(lipgloss.Color(t.StatusKeyFg)).
 		Padding(0, 1)
 }
+
+func (t Theme) SpinnerStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.ThinkingText))
+}

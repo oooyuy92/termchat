@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/roles"
 	"github.com/termchat/termchat/internal/shortcuts"
@@ -28,6 +29,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.Width = msg.Width
 		m.viewport.Height = vpHeight
+		m.textarea.SetWidth(msg.Width)
 		// Re-render content at new size
 		m.viewport.SetContent(m.buildChatContent())
 		if m.chatFollowBottom {
@@ -130,11 +132,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
-			input := strings.TrimSpace(m.input)
+			input := strings.TrimSpace(m.textarea.Value())
 			if input == "" {
 				return m, nil
 			}
-			m.input = ""
+			m.textarea.Reset()
 
 			if strings.HasPrefix(input, "/") {
 				return m.handleCommand(input)
@@ -144,45 +146,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingImages = nil
 			m.streaming = true
 			m.chatFollowBottom = true
-			m.viewport.SetContent(m.buildChatContent())
-			m.viewport.GotoBottom()
 			m.currentResp = ""
 			m.currentThinking = ""
 			m.err = nil
 
 			ctx, cancel := context.WithCancel(context.Background())
 			m.streamCtrl = &streamControl{cancel: cancel}
+			m.viewport.SetContent(m.buildChatContent())
+			m.viewport.GotoBottom()
 
-			return m, m.sendStreamCmd(ctx)
-
-		case "backspace":
-			runes := []rune(m.input)
-			if len(runes) > 0 {
-				m.input = string(runes[:len(runes)-1])
-			}
+			return m, tea.Batch(m.sendStreamCmd(ctx), m.spinner.Tick)
 
 		case "ctrl+v":
 			return m, m.pasteFromClipboard()
 
 		default:
-			if msg.Type == tea.KeyRunes {
-				raw := string(msg.Runes)
-				// Some terminal/tmux combinations leak SGR mouse bytes as runes
-				// (e.g. "<65;43;25M"). Swallow them so they don't pollute input.
-				if looksLikeSGRMouse(raw) {
-					return m, nil
-				}
-				m.input += raw
-				// Enter slash autocomplete mode when "/" is typed as the first character
-				if m.input == "/" {
-					m.mode = modeSlashComplete
-					m.slashAC = slashComplete{
-						matches: filterSlashCmds("/"),
-						cursor:  0,
-						offset:  0,
-					}
+			var cmd tea.Cmd
+			m.textarea, cmd = m.textarea.Update(msg)
+			// Enter slash autocomplete mode when "/" is typed as the first character
+			if m.textarea.Value() == "/" {
+				m.mode = modeSlashComplete
+				m.slashAC = slashComplete{
+					matches: filterSlashCmds("/"),
+					cursor:  0,
+					offset:  0,
 				}
 			}
+			return m, cmd
+		}
+		return m, nil
+
+	case spinner.TickMsg:
+		if m.streaming {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
 		}
 		return m, nil
 
@@ -207,7 +205,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamStartMsg:
 		m.streamCh = msg.chunks
 		m.streamErr = msg.errs
-		return m, m.readNextChunk()
+		return m, tea.Batch(m.readNextChunk(), m.spinner.Tick)
 
 	case streamDoneMsg:
 		m.streaming = false
@@ -285,12 +283,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Image != nil {
 			m.imageCounter++
 			m.pendingImages = append(m.pendingImages, *msg.Image)
-			m.input += fmt.Sprintf("[image %d]", m.imageCounter)
+			m.textarea.InsertString(fmt.Sprintf("[image %d]", m.imageCounter))
 			m.statusMsg = fmt.Sprintf("Image %d pasted", m.imageCounter)
 			return m, nil
 		}
-		m.input += msg.Text
-		if m.input == "/" {
+		m.textarea.InsertString(msg.Text)
+		if m.textarea.Value() == "/" {
 			m.mode = modeSlashComplete
 			m.slashAC = slashComplete{
 				matches: filterSlashCmds("/"),

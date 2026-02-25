@@ -9,9 +9,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/roles"
@@ -174,7 +177,8 @@ type Model struct {
 	activeRole       string // name of the selected role; shown in status bar
 	cfgPath          string
 	autoSaveName     string
-	input            string
+	textarea         textarea.Model
+	spinner          spinner.Model
 	pendingImages    []chat.ImageData
 	imageCounter     int
 	slashAC          slashComplete
@@ -274,6 +278,26 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Pr
 		configEd:         initConfigEd,
 		viewport:         viewport.New(0, 0),
 		chatFollowBottom: true,
+		textarea: func() textarea.Model {
+			ta := textarea.New()
+			ta.Placeholder = "Message... (Shift+Enter for newline)"
+			ta.Focus()
+			ta.SetHeight(3)
+			ta.ShowLineNumbers = false
+			ta.KeyMap.InsertNewline.SetKeys("shift+enter")
+			ta.FocusedStyle.Base = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("62"))
+			ta.BlurredStyle.Base = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("240"))
+			return ta
+		}(),
+		spinner: func() spinner.Model {
+			s := spinner.New()
+			s.Spinner = spinner.Dot
+			return s
+		}(),
 	}, nil
 }
 
