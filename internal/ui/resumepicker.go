@@ -149,7 +149,11 @@ func (m Model) updateExportPick(msg tea.KeyMsg) (Model, tea.Cmd) {
 		ext := exts[p.exportFmt]
 		path, err := export.ResolvePath(m.cfg.Settings.ExportDir, conv.Name, ext)
 		if err != nil {
-			m.statusMsg = "Export failed: " + err.Error()
+			if err == export.ErrNoDownloadsDir {
+				m.statusMsg = "Downloads folder not found — set Export Dir in /settings"
+			} else {
+				m.statusMsg = "Export failed: " + err.Error()
+			}
 			return m, nil
 		}
 		switch p.exportFmt {

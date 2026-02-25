@@ -41,19 +41,39 @@ func ExportMd(path string, msgs []chat.Message) error {
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
+// ErrNoDownloadsDir is returned when the Downloads directory cannot be found.
+// The caller should prompt the user to configure export_dir in settings.
+var ErrNoDownloadsDir = fmt.Errorf("Downloads folder not found; set export_dir in /settings")
+
+// defaultDownloadsDir returns the platform-appropriate Downloads directory,
+// or an error if it cannot be determined or does not exist.
+func defaultDownloadsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", ErrNoDownloadsDir
+	}
+	// Windows: %USERPROFILE%\Downloads
+	// macOS/Linux: ~/Downloads
+	dir := filepath.Join(home, "Downloads")
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return "", ErrNoDownloadsDir
+	}
+	return dir, nil
+}
+
 // ResolvePath returns the full export path for a conversation name and extension.
-// If exportDir is empty, uses the current working directory.
+// If exportDir is empty, uses the platform Downloads folder.
+// Returns ErrNoDownloadsDir if Downloads doesn't exist and no exportDir is configured.
 func ResolvePath(exportDir, convName, ext string) (string, error) {
 	dir := exportDir
 	if dir == "" {
 		var err error
-		dir, err = os.Getwd()
+		dir, err = defaultDownloadsDir()
 		if err != nil {
 			return "", err
 		}
-	}
-	// Expand ~ if present
-	if strings.HasPrefix(dir, "~/") {
+	} else if strings.HasPrefix(dir, "~/") {
+		// Expand ~ if present in user-configured path
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
