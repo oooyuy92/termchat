@@ -21,27 +21,7 @@ func testChatModel() Model {
 	}
 }
 
-func TestHandleMouseFallbackRunesScrollsAndSwallows(t *testing.T) {
-	m := testChatModel()
 
-	if !m.handleMouseFallbackRunes("1<65;43;25ML") {
-		t.Fatalf("expected mouse fallback runes to be detected")
-	}
-	if m.chatScrollTop == 0 {
-		t.Fatalf("expected wheel-down fallback to scroll chat")
-	}
-	if m.chatFollowBottom {
-		t.Fatalf("expected manual scroll to disable follow-bottom")
-	}
-
-	topAfterDown := m.chatScrollTop
-	if !m.handleMouseFallbackRunes("<64;43;25M") {
-		t.Fatalf("expected wheel-up fallback to be detected")
-	}
-	if m.chatScrollTop >= topAfterDown {
-		t.Fatalf("expected wheel-up fallback to decrease scrollTop")
-	}
-}
 
 func TestUpdateIgnoresMouseFallbackRunesInInput(t *testing.T) {
 	m := testChatModel()

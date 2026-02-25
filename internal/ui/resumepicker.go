@@ -108,7 +108,7 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		for _, msg := range msgs {
 			m.history.Add(msg)
 		}
-		m.chatScrollTop = 0
+		m.viewport.GotoBottom()
 		m.chatFollowBottom = true
 		m.mode = modeChat
 		m.statusMsg = "Resumed: " + conv.Name

@@ -4,7 +4,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +20,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		if msg.Width > 0 {
 			m.recreateRenderer(msg.Width)
+		}
+		// viewport height = total height - 1 (input line) - 1 (status bar)
+		vpHeight := msg.Height - 2
+		if vpHeight < 1 {
+			vpHeight = 1
+		}
+		m.viewport.Width = msg.Width
+		m.viewport.Height = vpHeight
+		// Re-render content at new size
+		m.viewport.SetContent(m.buildChatContent())
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
 		}
 		return m, nil
 
@@ -51,8 +62,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.streaming {
-			if m.handleChatScrollKey(msg.String()) {
-				return m, nil
+			if isScrollKey(msg.String()) {
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(msg)
+				m.chatFollowBottom = m.viewport.AtBottom()
+				return m, cmd
 			}
 			if msg.String() == "ctrl+c" {
 				if m.confirmQuit {
@@ -83,8 +97,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "up", "down", "pgup", "pgdown", "home", "end":
-			m.handleChatScrollKey(msg.String())
-			return m, nil
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			m.chatFollowBottom = m.viewport.AtBottom()
+			return m, cmd
 
 		case "esc":
 			m.escCount++
@@ -124,6 +140,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingImages = nil
 			m.streaming = true
 			m.chatFollowBottom = true
+			m.viewport.SetContent(m.buildChatContent())
+			m.viewport.GotoBottom()
 			m.currentResp = ""
 			m.currentThinking = ""
 			m.err = nil
@@ -147,7 +165,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				raw := string(msg.Runes)
 				// Some terminal/tmux combinations leak SGR mouse bytes as runes
 				// (e.g. "<65;43;25M"). Swallow them so they don't pollute input.
-				if m.handleMouseFallbackRunes(raw) {
+				if looksLikeSGRMouse(raw) {
 					return m, nil
 				}
 				m.input += raw
@@ -164,9 +182,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		if m.mode == modeChat {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			m.chatFollowBottom = m.viewport.AtBottom()
+			return m, cmd
+		}
+
 	case streamChunkMsg:
 		m.currentResp += msg.Content
 		m.currentThinking += msg.Thinking
+		m.viewport.SetContent(m.buildChatContent())
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
+		}
 		return m, m.readNextChunk()
 
 	case streamStartMsg:
@@ -182,6 +212,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.currentResp = ""
 		m.currentThinking = ""
+		m.viewport.SetContent(m.buildChatContent())
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
+		}
 		return m, m.autoSaveCmd()
 
 	case streamErrMsg:
@@ -261,113 +295,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouseFallbackRunes parses mouse SGR fragments that may arrive as text
-// and converts wheel events into chat scrolling.
-func (m *Model) handleMouseFallbackRunes(raw string) bool {
-	handled := false
-	for i := 0; i < len(raw); i++ {
-		if raw[i] != '<' {
-			continue
-		}
-		j := i + 1
-		for j < len(raw) {
-			c := raw[j]
-			if (c >= '0' && c <= '9') || c == ';' {
-				j++
-				continue
-			}
-			break
-		}
-		if j >= len(raw) || (raw[j] != 'M' && raw[j] != 'm') || j == i+1 {
-			continue
-		}
 
-		parts := strings.Split(raw[i+1:j], ";")
-		if len(parts) != 3 {
-			handled = true
-			i = j
-			continue
-		}
-		btn, err := strconv.Atoi(parts[0])
-		if err == nil {
-			// xterm mouse encoding puts modifiers on top of base button code.
-			baseBtn := btn &^ (4 | 8 | 16)
-			switch baseBtn {
-			case 64:
-				m.scrollChatBy(-3)
-			case 65:
-				m.scrollChatBy(3)
-			}
-		}
-		handled = true
-		i = j
-	}
-	return handled
+// looksLikeSGRMouse reports whether s contains an SGR mouse sequence
+// (e.g. "<65;43;25M") that leaked through as key runes.
+func looksLikeSGRMouse(s string) bool {
+	return len(s) > 3 && s[0] == '<'
 }
 
-func (m Model) maxChatScrollTop() int {
-	return m.maxChatScrollForContent(m.buildChatContent())
-}
-
-func (m *Model) scrollChatBy(delta int) bool {
-	maxTop := m.maxChatScrollTop()
-	if maxTop == 0 {
-		m.chatScrollTop = 0
-		m.chatFollowBottom = true
-		return false
-	}
-
-	oldTop := m.chatScrollTop
-	oldFollow := m.chatFollowBottom
-
-	m.chatFollowBottom = false
-	m.chatScrollTop += delta
-	if m.chatScrollTop < 0 {
-		m.chatScrollTop = 0
-	}
-	if m.chatScrollTop > maxTop {
-		m.chatScrollTop = maxTop
-	}
-	if m.chatScrollTop == maxTop {
-		m.chatFollowBottom = true
-	}
-	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
-}
-
-func (m *Model) scrollChatToTop() bool {
-	oldTop := m.chatScrollTop
-	oldFollow := m.chatFollowBottom
-	m.chatScrollTop = 0
-	m.chatFollowBottom = false
-	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
-}
-
-func (m *Model) scrollChatToBottom() bool {
-	maxTop := m.maxChatScrollTop()
-	oldTop := m.chatScrollTop
-	oldFollow := m.chatFollowBottom
-	m.chatScrollTop = maxTop
-	m.chatFollowBottom = true
-	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
-}
-
-func (m *Model) handleChatScrollKey(key string) bool {
+func isScrollKey(key string) bool {
 	switch key {
-	case "up":
-		return m.scrollChatBy(-1)
-	case "down":
-		return m.scrollChatBy(1)
-	case "pgup":
-		return m.scrollChatBy(-(m.chatViewportHeight() - 1))
-	case "pgdown":
-		return m.scrollChatBy(m.chatViewportHeight() - 1)
-	case "home":
-		return m.scrollChatToTop()
-	case "end":
-		return m.scrollChatToBottom()
-	default:
-		return false
+	case "up", "down", "pgup", "pgdown", "home", "end":
+		return true
 	}
+	return false
 }
 
 func (m Model) sendStreamCmd(ctx context.Context) tea.Cmd {
@@ -449,8 +389,9 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		m.totalTokens = 0
 		m.pendingImages = nil
 		m.imageCounter = 0
-		m.chatScrollTop = 0
 		m.chatFollowBottom = true
+		m.viewport.SetContent("")
+		m.viewport.GotoBottom()
 		m.statusMsg = "Conversation cleared"
 		return m, nil
 

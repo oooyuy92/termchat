@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/termchat/termchat/internal/chat"
@@ -187,8 +188,8 @@ type Model struct {
 	totalTokens      int
 	width            int
 	height           int
-	chatScrollTop    int
-	chatFollowBottom bool
+	viewport         viewport.Model
+	chatFollowBottom bool  // still needed: tracks whether to auto-scroll on new content
 	err              error
 }
 
@@ -271,6 +272,7 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Pr
 		rolesPath:        rolesPath,
 		rolePick:         rolePick,
 		configEd:         initConfigEd,
+		viewport:         viewport.New(0, 0),
 		chatFollowBottom: true,
 	}, nil
 }

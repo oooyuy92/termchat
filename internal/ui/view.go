@@ -68,54 +68,6 @@ func hardWrapRenderedMarkdown(s string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) chatViewportHeight() int {
-	// Keep one line for the status bar.
-	h := m.height - 1
-	if h < 1 {
-		return 1
-	}
-	return h
-}
-
-func (m Model) maxChatScrollForContent(content string) int {
-	totalLines := strings.Count(content, "\n") + 1
-	viewportHeight := m.chatViewportHeight()
-	if totalLines <= viewportHeight {
-		return 0
-	}
-	return totalLines - viewportHeight
-}
-
-func (m Model) renderChatViewport(content string) string {
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 {
-		return ""
-	}
-
-	viewportHeight := m.chatViewportHeight()
-	maxTop := m.maxChatScrollForContent(content)
-
-	top := m.chatScrollTop
-	if m.chatFollowBottom {
-		top = maxTop
-	}
-	if top < 0 {
-		top = 0
-	}
-	if top > maxTop {
-		top = maxTop
-	}
-
-	end := top + viewportHeight
-	if end > len(lines) {
-		end = len(lines)
-	}
-	if end < top {
-		end = top
-	}
-	return strings.Join(lines[top:end], "\n")
-}
-
 func (m Model) buildChatContent() string {
 	var b strings.Builder
 
@@ -165,11 +117,6 @@ func (m Model) buildChatContent() string {
 		b.WriteString(m.theme.ErrStyle().Render(fmt.Sprintf("Error: %v", m.err)) + "\n")
 	}
 
-	// Input area.
-	if !m.streaming {
-		b.WriteString(m.theme.InputPromptStyle().Render("> ") + m.input)
-	}
-
 	return b.String()
 }
 
@@ -199,6 +146,9 @@ func (m Model) View() string {
 		return m.viewMessageBrowse()
 	}
 
-	content := m.buildChatContent()
-	return m.renderChatViewport(content) + "\n" + m.renderStatusBar()
+	inputLine := m.theme.InputPromptStyle().Render("> ") + m.input
+	if m.streaming {
+		inputLine = ""
+	}
+	return m.viewport.View() + "\n" + inputLine + "\n" + m.renderStatusBar()
 }
