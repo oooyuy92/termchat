@@ -88,8 +88,9 @@ func main() {
 		opts = append(opts, tea.WithAltScreen())
 		setAlternateScroll(os.Stdout, true)
 		defer setAlternateScroll(os.Stdout, false)
+	} else {
+		opts = append(opts, tea.WithMouseCellMotion())
 	}
-	opts = append(opts, tea.WithMouseCellMotion())
 	p := tea.NewProgram(model, opts...)
 
 	finalModel, runErr := p.Run()
