@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/muesli/reflow/wrap"
 )
 
@@ -27,6 +28,43 @@ func cleanGlamourOutput(s string) string {
 	s = strings.ReplaceAll(s, "\n\n", "\n")
 	s = strings.TrimRight(s, " \n")
 	return s
+}
+
+func wrapRenderedLine(line string, width int) string {
+	if width <= 0 || xansi.StringWidth(line) <= width {
+		return line
+	}
+
+	plain := xansi.Strip(line)
+	if !strings.HasPrefix(plain, "│ ") {
+		return wrap.String(line, width)
+	}
+
+	const quotePrefixWidth = 2 // "│ "
+	if quotePrefixWidth >= width {
+		return wrap.String(line, width)
+	}
+
+	prefix := xansi.Cut(line, 0, quotePrefixWidth)
+	content := xansi.Cut(line, quotePrefixWidth, xansi.StringWidth(line))
+
+	wrappedContent := wrap.String(content, width-quotePrefixWidth)
+	parts := strings.Split(wrappedContent, "\n")
+	for i, part := range parts {
+		parts[i] = prefix + part
+	}
+	return strings.Join(parts, "\n")
+}
+
+func hardWrapRenderedMarkdown(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = wrapRenderedLine(line, width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) chatViewportHeight() int {
@@ -93,11 +131,9 @@ func (m Model) buildChatContent() string {
 				b.WriteString(msg.Content + "\n\n")
 			} else {
 				cleaned := cleanGlamourOutput(rendered)
-				// Hard-wrap long lines (e.g. Chinese text with no spaces) that
-				// glamour's word-wrapper cannot break at word boundaries.
-				if m.width > 0 {
-					cleaned = wrap.String(cleaned, m.width)
-				}
+				// Hard-wrap long lines (e.g. Chinese text with no spaces) while
+				// preserving blockquote prefixes on continuation lines.
+				cleaned = hardWrapRenderedMarkdown(cleaned, m.width)
 				b.WriteString(cleaned + "\n\n")
 			}
 		}
@@ -116,9 +152,7 @@ func (m Model) buildChatContent() string {
 				b.WriteString(m.currentResp)
 			} else {
 				cleaned := cleanGlamourOutput(rendered)
-				if m.width > 0 {
-					cleaned = wrap.String(cleaned, m.width)
-				}
+				cleaned = hardWrapRenderedMarkdown(cleaned, m.width)
 				b.WriteString(cleaned + "\n")
 			}
 		}
