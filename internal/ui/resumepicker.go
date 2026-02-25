@@ -83,7 +83,7 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if len(p.groups) > 0 && p.convIdx < len(p.groups[p.dateIdx].convs)-1 {
 			p.convIdx++
 		}
-	case "s":
+	case "e":
 		if len(p.groups) > 0 {
 			p.exporting = true
 		}
@@ -230,7 +230,7 @@ func (m Model) viewResumePicker() string {
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  ←/→: select format  Enter: export  Esc: cancel"))
 		b.WriteString("\n")
 	} else {
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: select  |  ←→: change date  |  Enter: resume  |  s: export  |  Esc: back"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: select  |  ←→: change date  |  Enter: resume  |  e: export  |  Esc: back"))
 		b.WriteString("\n")
 	}
 

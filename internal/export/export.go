@@ -12,7 +12,7 @@ import (
 	"github.com/termchat/termchat/internal/chat"
 )
 
-//go:embed fonts/NotoSansSC-Regular.otf
+//go:embed fonts/NotoSansSC-Regular.ttf
 var notoSansSC []byte
 
 // ExportTxt writes messages to path as plain text.
