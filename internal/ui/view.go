@@ -146,9 +146,8 @@ func (m Model) View() string {
 		return m.viewMessageBrowse()
 	}
 
-	inputLine := m.theme.InputPromptStyle().Render("> ") + m.input
 	if m.streaming {
-		inputLine = ""
+		return m.viewport.View() + "\n" + m.renderStatusBar()
 	}
-	return m.viewport.View() + "\n" + inputLine + "\n" + m.renderStatusBar()
+	return m.viewport.View() + "\n" + m.theme.InputPromptStyle().Render("> ") + m.input + "\n" + m.renderStatusBar()
 }

@@ -80,6 +80,7 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Rollback: keep messages[0..cursor] inclusive
 		n := m.browseCursor + 1
 		m.history.Truncate(n)
+		m.viewport.SetContent(m.buildChatContent())
 		m.viewport.GotoBottom()
 		m.chatFollowBottom = true
 		m.statusMsg = fmt.Sprintf("Rolled back to message %d", n)
@@ -93,6 +94,7 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.history.DeleteAt(m.browseCursor)
 		remaining := m.history.Messages()
 		if len(remaining) == 0 {
+			m.viewport.SetContent(m.buildChatContent())
 			m.viewport.GotoBottom()
 			m.chatFollowBottom = true
 			m.mode = modeChat
@@ -109,6 +111,7 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		newName := time.Now().Format("2006-01-02_150405")
 		m.history.Truncate(m.browseCursor + 1)
 		m.autoSaveName = newName
+		m.viewport.SetContent(m.buildChatContent())
 		m.viewport.GotoBottom()
 		m.chatFollowBottom = true
 		m.statusMsg = fmt.Sprintf("Branched at message %d: %s", m.browseCursor+1, newName)

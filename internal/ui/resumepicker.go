@@ -108,6 +108,7 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		for _, msg := range msgs {
 			m.history.Add(msg)
 		}
+		m.viewport.SetContent(m.buildChatContent())
 		m.viewport.GotoBottom()
 		m.chatFollowBottom = true
 		m.mode = modeChat

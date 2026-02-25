@@ -79,6 +79,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.streaming = false
 				m.currentResp = ""
 				m.currentThinking = ""
+				m.viewport.SetContent(m.buildChatContent())
+				if m.chatFollowBottom {
+					m.viewport.GotoBottom()
+				}
 				m.confirmQuit = true
 				m.statusMsg = "Press Ctrl+C again to quit"
 				return m, nil
@@ -189,6 +193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chatFollowBottom = m.viewport.AtBottom()
 			return m, cmd
 		}
+		return m, nil
 
 	case streamChunkMsg:
 		m.currentResp += msg.Content
@@ -224,6 +229,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.Err
 		m.currentResp = ""
 		m.currentThinking = ""
+		m.viewport.SetContent(m.buildChatContent())
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
+		}
 		return m, nil
 
 	case commandResultMsg:
