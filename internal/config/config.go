@@ -71,7 +71,7 @@ func DefaultConfig() Config {
 		},
 		Settings: SettingsConfig{
 			Theme:           "dark",
-			AlternateScreen: "never",
+			AlternateScreen: "auto",
 		},
 	}
 }
