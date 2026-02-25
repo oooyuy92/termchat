@@ -57,12 +57,13 @@ func wrapRenderedLine(line string, width int) string {
 }
 
 func hardWrapRenderedMarkdown(s string, width int) string {
-	if width <= 0 {
+	wrapWidth := markdownWrapWidth(width)
+	if wrapWidth <= 0 {
 		return s
 	}
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
-		lines[i] = wrapRenderedLine(line, width)
+		lines[i] = wrapRenderedLine(line, wrapWidth)
 	}
 	return strings.Join(lines, "\n")
 }

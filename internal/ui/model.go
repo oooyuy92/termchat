@@ -95,7 +95,6 @@ type configEditor struct {
 	editErr string
 }
 
-
 // shortcutSubMode describes what the shortcut editor is currently doing.
 type shortcutSubMode int
 
@@ -207,7 +206,7 @@ func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
 	s.Paragraph.BlockSuffix = ""
 	return glamour.NewTermRenderer(
 		glamour.WithStyles(s),
-		glamour.WithWordWrap(width),
+		glamour.WithWordWrap(markdownWrapWidth(width)),
 	)
 }
 
@@ -291,4 +290,15 @@ func (m *Model) recreateRenderer(width int) {
 	if err == nil {
 		m.renderer = r
 	}
+}
+
+func markdownWrapWidth(termWidth int) int {
+	const safetyMargin = 2
+	if termWidth <= 0 {
+		return 80
+	}
+	if termWidth > safetyMargin+1 {
+		return termWidth - safetyMargin
+	}
+	return termWidth
 }
