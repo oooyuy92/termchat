@@ -10,15 +10,15 @@ func TestFilterSlashCmds_slash(t *testing.T) {
 }
 
 func TestFilterSlashCmds_prefix(t *testing.T) {
-	got := filterSlashCmds("/r")
+	got := filterSlashCmds("/s")
 	if len(got) != 2 {
-		t.Fatalf("filterSlashCmds(\"/r\") = %d results, want 2", len(got))
+		t.Fatalf("filterSlashCmds(\"/s\") = %d results, want 2", len(got))
 	}
-	if got[0].Name != "/resume" {
-		t.Errorf("got[0].Name = %q, want \"/resume\"", got[0].Name)
+	if got[0].Name != "/settings" {
+		t.Errorf("got[0].Name = %q, want \"/settings\"", got[0].Name)
 	}
-	if got[1].Name != "/roles" {
-		t.Errorf("got[1].Name = %q, want \"/roles\"", got[1].Name)
+	if got[1].Name != "/shortcuts" {
+		t.Errorf("got[1].Name = %q, want \"/shortcuts\"", got[1].Name)
 	}
 }
 

@@ -59,7 +59,7 @@ termchat --no-alt-screen
 
 **Conversation management**
 - Auto-saves every conversation to SQLite after each response
-- `/resume` — browse and restore past conversations with a date-grouped picker
+- `/history` — browse and restore past conversations with a date-grouped picker
 - `/save [name]` — save current conversation under a custom name
 - `/load [name]` — load a saved conversation
 - `/list` — list all saved conversations
@@ -77,7 +77,7 @@ termchat --no-alt-screen
 
 | Command | Description |
 |---------|-------------|
-| `/resume` | Open conversation history picker |
+| `/history` | Open conversation history picker |
 | `/save [name]` | Save current conversation |
 | `/load [name]` | Load a saved conversation |
 | `/list` | List all conversations |
