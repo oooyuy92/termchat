@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type slashCmd struct {
@@ -164,26 +165,11 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewSlashComplete() string {
-	var b strings.Builder
+	statusBar := m.renderStatusBar()
+	inputArea := m.textarea.View()
 
-	// Render conversation history (same as chat mode)
-	for _, msg := range m.history.Messages() {
-		switch msg.Role {
-		case "user":
-			b.WriteString(m.theme.UserLabelStyle().Render("You:") + "\n")
-			b.WriteString(msg.Content + "\n\n")
-		case "assistant":
-			b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
-			rendered, err := m.renderer.Render(msg.Content)
-			if err != nil {
-				b.WriteString(msg.Content + "\n\n")
-			} else {
-				b.WriteString(cleanGlamourOutput(rendered) + "\n\n")
-			}
-		}
-	}
-
-	// Dropdown: show up to slashACMaxVisible candidates
+	// Build dropdown lines
+	var dropdownLines []string
 	ac := m.slashAC
 	end := ac.offset + slashACMaxVisible
 	if end > len(ac.matches) {
@@ -194,15 +180,33 @@ func (m Model) viewSlashComplete() string {
 		if i == ac.cursor {
 			prefix := m.theme.ConfigCursorStyle().Render("> ")
 			line := prefix + m.theme.ConfigLabelStyle().Render(fmt.Sprintf("%-12s", c.Name)) + " " + m.theme.ConfigHelpStyle().Render(c.Desc)
-			b.WriteString(line + "\n")
+			dropdownLines = append(dropdownLines, line)
 		} else {
 			line := m.theme.ConfigHelpStyle().Render(fmt.Sprintf("  %-12s %s", c.Name, c.Desc))
-			b.WriteString(line + "\n")
+			dropdownLines = append(dropdownLines, line)
+		}
+	}
+	dropdown := strings.Join(dropdownLines, "\n")
+
+	// Dynamic viewport height — same calculation as View()
+	vpHeight := m.height - lipgloss.Height(statusBar) - lipgloss.Height(inputArea)
+	if dropdown != "" {
+		vpHeight -= lipgloss.Height(dropdown)
+	}
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	if m.viewport.Height != vpHeight {
+		m.viewport.Height = vpHeight
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
 		}
 	}
 
-	// Input line
-	b.WriteString(m.theme.InputPromptStyle().Render("> ") + m.textarea.Value())
-
-	return b.String() + "\n" + m.renderStatusBar()
+	parts := []string{m.viewport.View()}
+	if dropdown != "" {
+		parts = append(parts, dropdown)
+	}
+	parts = append(parts, inputArea, statusBar)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
