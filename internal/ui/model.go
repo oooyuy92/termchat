@@ -95,18 +95,6 @@ type configEditor struct {
 	editErr string
 }
 
-type dateGroup struct {
-	date  string             // "YYYY-MM-DD"
-	convs []storage.ConvInfo // conversations in this group (most recent first)
-}
-
-type resumePicker struct {
-	groups    []dateGroup
-	dateIdx   int  // index into groups (left/right navigation)
-	convIdx   int  // index within groups[dateIdx].convs (up/down navigation)
-	exporting bool // true when format selector is active
-	exportFmt int  // 0=txt, 1=md, 2=pdf
-}
 
 // shortcutSubMode describes what the shortcut editor is currently doing.
 type shortcutSubMode int
