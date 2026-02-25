@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/termchat/termchat/internal/export"
 	"github.com/termchat/termchat/internal/storage"
 )
 
@@ -45,6 +46,11 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.confirmQuit = false
 	}
 
+	// If export picker is active, handle its keys first
+	if p.exporting {
+		return m.updateExportPick(msg)
+	}
+
 	switch msg.String() {
 	case "left", "h":
 		if p.dateIdx > 0 {
@@ -63,6 +69,10 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "down", "j":
 		if len(p.groups) > 0 && p.convIdx < len(p.groups[p.dateIdx].convs)-1 {
 			p.convIdx++
+		}
+	case "s":
+		if len(p.groups) > 0 {
+			p.exporting = true
 		}
 	case "enter":
 		if len(p.groups) == 0 {
@@ -97,6 +107,51 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		m.confirmQuit = true
 		m.statusMsg = "Press Ctrl+C again to quit"
+	}
+	return m, nil
+}
+
+func (m Model) updateExportPick(msg tea.KeyMsg) (Model, tea.Cmd) {
+	p := &m.resumePick
+	switch msg.String() {
+	case "left", "h":
+		if p.exportFmt > 0 {
+			p.exportFmt--
+		}
+	case "right", "l":
+		if p.exportFmt < 2 {
+			p.exportFmt++
+		}
+	case "esc":
+		p.exporting = false
+	case "enter":
+		p.exporting = false
+		conv := p.groups[p.dateIdx].convs[p.convIdx]
+		msgs, err := m.store.Load(conv.Name)
+		if err != nil {
+			m.statusMsg = "Export failed: " + err.Error()
+			return m, nil
+		}
+		exts := []string{"txt", "md", "pdf"}
+		ext := exts[p.exportFmt]
+		path, err := export.ResolvePath(m.cfg.Settings.ExportDir, conv.Name, ext)
+		if err != nil {
+			m.statusMsg = "Export failed: " + err.Error()
+			return m, nil
+		}
+		switch p.exportFmt {
+		case 0:
+			err = export.ExportTxt(path, msgs)
+		case 1:
+			err = export.ExportMd(path, msgs)
+		case 2:
+			err = export.ExportPdf(path, msgs)
+		}
+		if err != nil {
+			m.statusMsg = "Export failed: " + err.Error()
+		} else {
+			m.statusMsg = "Saved to " + path
+		}
 	}
 	return m, nil
 }
@@ -146,8 +201,25 @@ func (m Model) viewResumePicker() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: select  |  ←→: change date  |  Enter: resume  |  Esc: back"))
-	b.WriteString("\n")
+	if p.exporting {
+		fmts := []string{"txt", "md", "pdf"}
+		var parts []string
+		for i, f := range fmts {
+			if i == p.exportFmt {
+				parts = append(parts, m.theme.ConfigCursorStyle().Render("["+f+"]"))
+			} else {
+				parts = append(parts, m.theme.ConfigHelpStyle().Render(f))
+			}
+		}
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Export: ") +
+			strings.Join(parts, m.theme.ConfigHelpStyle().Render(" | ")))
+		b.WriteString("\n")
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  ←/→: select format  Enter: export  Esc: cancel"))
+		b.WriteString("\n")
+	} else {
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: select  |  ←→: change date  |  Enter: resume  |  s: export  |  Esc: back"))
+		b.WriteString("\n")
+	}
 
 	return b.String() + "\n" + m.renderStatusBar()
 }
