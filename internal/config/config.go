@@ -19,6 +19,7 @@ type Config struct {
 type SettingsConfig struct {
 	Theme           string `yaml:"theme"`
 	AlternateScreen string `yaml:"alternate_screen"`
+	ExportDir       string `yaml:"export_dir,omitempty"`
 }
 
 type APIConfig struct {
