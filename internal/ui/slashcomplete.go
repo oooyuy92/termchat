@@ -79,7 +79,7 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc":
-		m.textarea.SetValue("")
+		m.tabs[m.activeTab].textarea.SetValue("")
 		m.mode = modeChat
 		return m, nil
 
@@ -104,7 +104,7 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "tab":
 		// Fill selected command name into input, return to chat to edit args
 		if len(m.slashAC.matches) > 0 {
-			m.textarea.SetValue(m.slashAC.matches[m.slashAC.cursor].Name)
+			m.tabs[m.activeTab].textarea.SetValue(m.slashAC.matches[m.slashAC.cursor].Name)
 		}
 		m.mode = modeChat
 		return m, nil
@@ -113,7 +113,7 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Execute selected command immediately
 		if len(m.slashAC.matches) > 0 {
 			cmd := m.slashAC.matches[m.slashAC.cursor].Name
-			m.textarea.SetValue("")
+			m.tabs[m.activeTab].textarea.SetValue("")
 			m.mode = modeChat
 			newModel, teaCmd := m.handleCommand(cmd)
 			if updated, ok := newModel.(Model); ok {
@@ -125,16 +125,16 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "backspace":
-		val := m.textarea.Value()
+		val := m.tabs[m.activeTab].textarea.Value()
 		runes := []rune(val)
 		if len(runes) > 0 {
-			m.textarea.SetValue(string(runes[:len(runes)-1]))
+			m.tabs[m.activeTab].textarea.SetValue(string(runes[:len(runes)-1]))
 		}
-		if m.textarea.Value() == "" {
+		if m.tabs[m.activeTab].textarea.Value() == "" {
 			m.mode = modeChat
 			return m, nil
 		}
-		m.slashAC.matches = filterSlashCmds(m.textarea.Value())
+		m.slashAC.matches = filterSlashCmds(m.tabs[m.activeTab].textarea.Value())
 		if len(m.slashAC.matches) == 0 {
 			m.mode = modeChat
 			return m, nil
@@ -149,8 +149,8 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if msg.Type != tea.KeyRunes {
 			return m, nil
 		}
-		m.textarea.SetValue(m.textarea.Value() + string(msg.Runes))
-		m.slashAC.matches = filterSlashCmds(m.textarea.Value())
+		m.tabs[m.activeTab].textarea.SetValue(m.tabs[m.activeTab].textarea.Value() + string(msg.Runes))
+		m.slashAC.matches = filterSlashCmds(m.tabs[m.activeTab].textarea.Value())
 		if len(m.slashAC.matches) == 0 {
 			// No matches — fall back to chat mode
 			m.mode = modeChat
@@ -165,8 +165,9 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewSlashComplete() string {
+	tabBar := (&m).renderTabBar()
 	statusBar := m.renderStatusBar()
-	inputArea := m.textarea.View()
+	inputArea := m.tabs[m.activeTab].textarea.View()
 
 	// Build dropdown lines
 	var dropdownLines []string
@@ -189,21 +190,25 @@ func (m Model) viewSlashComplete() string {
 	dropdown := strings.Join(dropdownLines, "\n")
 
 	// Dynamic viewport height — same calculation as View()
-	vpHeight := m.height - lipgloss.Height(statusBar) - lipgloss.Height(inputArea)
+	vpHeight := m.height -
+		lipgloss.Height(tabBar) -
+		lipgloss.Height(statusBar) -
+		lipgloss.Height(inputArea)
 	if dropdown != "" {
 		vpHeight -= lipgloss.Height(dropdown)
 	}
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
-	if m.viewport.Height != vpHeight {
-		m.viewport.Height = vpHeight
-		if m.chatFollowBottom {
-			m.viewport.GotoBottom()
+	tab := &m.tabs[m.activeTab]
+	if tab.viewport.Height != vpHeight {
+		tab.viewport.Height = vpHeight
+		if tab.chatFollowBottom {
+			tab.viewport.GotoBottom()
 		}
 	}
 
-	parts := []string{m.viewport.View()}
+	parts := []string{tabBar, tab.viewport.View()}
 	if dropdown != "" {
 		parts = append(parts, dropdown)
 	}

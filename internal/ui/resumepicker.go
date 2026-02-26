@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/export"
 	"github.com/termchat/termchat/internal/storage"
@@ -101,16 +102,16 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.mode = modeChat
 			return m, nil
 		}
-		m.autoSaveName = conv.Name
-		m.history.Clear()
-		m.history.SetSystemPrompt("")
+		m.activeTabSession().autoSaveName = conv.Name
+		m.activeTabSession().history.Clear()
+		m.activeTabSession().history.SetSystemPrompt("")
 		m.activeRole = ""
 		for _, msg := range msgs {
-			m.history.Add(msg)
+			m.activeTabSession().history.Add(msg)
 		}
-		m.viewport.SetContent(m.buildChatContent())
-		m.viewport.GotoBottom()
-		m.chatFollowBottom = true
+		m.activeTabSession().viewport.SetContent(m.buildChatContent())
+		m.activeTabSession().viewport.GotoBottom()
+		m.activeTabSession().chatFollowBottom = true
 		m.mode = modeChat
 		m.statusMsg = "Resumed: " + conv.Name
 	case "esc":
@@ -145,8 +146,8 @@ func (m Model) updateExportPick(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// If exporting the currently active conversation, use in-memory history
 		// to avoid missing the last message (autoSave is async).
 		var msgs []chat.Message
-		if conv.Name == m.autoSaveName {
-			msgs = m.history.Messages()
+		if conv.Name == m.activeTabSession().autoSaveName {
+			msgs = m.activeTabSession().history.Messages()
 		} else {
 			var err error
 			msgs, err = m.store.Load(conv.Name)
@@ -184,6 +185,7 @@ func (m Model) updateExportPick(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewResumePicker() string {
+	tabBar := (&m).renderTabBar()
 	var b strings.Builder
 	p := m.resumePick
 
@@ -195,7 +197,7 @@ func (m Model) viewResumePicker() string {
 		b.WriteString("\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Esc: back to chat"))
 		b.WriteString("\n")
-		return b.String() + "\n" + m.renderStatusBar()
+		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 	}
 
 	// Date navigation row
@@ -248,5 +250,5 @@ func (m Model) viewResumePicker() string {
 		b.WriteString("\n")
 	}
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }

@@ -6,15 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/roles"
@@ -35,20 +30,24 @@ const (
 	modeOnboard
 	modeSlashComplete
 	modeMessageBrowse
+	modeTabRename   // F2 rename active tab
+	modeTabOverflow // … overflow dropdown
 )
 
 // streamChunkMsg carries a token and optional thinking text from the streaming response.
 type streamChunkMsg struct {
+	TabIdx   int
 	Content  string
 	Thinking string
 }
 
 // streamDoneMsg signals the stream has finished.
-type streamDoneMsg struct{}
+type streamDoneMsg struct{ TabIdx int }
 
 // streamErrMsg signals a streaming error.
 type streamErrMsg struct {
-	Err error
+	TabIdx int
+	Err    error
 }
 
 // commandResultMsg carries output from a slash command.
@@ -58,6 +57,7 @@ type commandResultMsg struct {
 
 // streamStartMsg carries the channels for consuming a streaming response.
 type streamStartMsg struct {
+	TabIdx int
 	chunks <-chan chat.StreamChunk
 	errs   <-chan error
 }
@@ -68,7 +68,10 @@ type configSavedMsg struct {
 }
 
 // autoSavedMsg carries the result of a background auto-save (Err may be nil).
-type autoSavedMsg struct{ Err error }
+type autoSavedMsg struct {
+	TabIdx int
+	Err    error
+}
 
 // shortcutsSavedMsg carries the result of saving shortcuts to disk.
 type shortcutsSavedMsg struct{ Err error }
@@ -150,20 +153,17 @@ type streamControl struct {
 
 type Model struct {
 	cfg      config.Config
-	client   chat.Provider
-	history  *chat.History
 	store    *storage.Store
-	renderer *glamour.TermRenderer
 
 	// Theme
 	theme Theme
 
-	// Streaming channels
-	streamCh  <-chan chat.StreamChunk
-	streamErr <-chan error
-
-	// Stream cancellation
-	streamCtrl *streamControl
+	// Tab management
+	tabs             []TabSession
+	activeTab        int
+	tabRename        string      // input buffer when in modeTabRename
+	tabBarZones      []tabHitZone
+	tabOverflowOffset int
 
 	// UI state
 	mode             uiMode
@@ -176,25 +176,13 @@ type Model struct {
 	rolePick         rolePicker
 	activeRole       string // name of the selected role; shown in status bar
 	cfgPath          string
-	autoSaveName     string
-	textarea         textarea.Model
-	spinner          spinner.Model
-	pendingImages    []chat.ImageData
-	imageCounter     int
 	slashAC          slashComplete
 	escCount         int // consecutive Esc presses in chat mode for double-Esc detection
 	browseCursor     int // index of selected message in modeMessageBrowse
-	streaming        bool
 	confirmQuit      bool
-	currentResp      string
-	currentThinking  string
 	statusMsg        string
-	totalTokens      int
 	width            int
 	height           int
-	viewport         viewport.Model
-	chatFollowBottom bool  // still needed: tracks whether to auto-scroll on new content
-	err              error
 }
 
 func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
@@ -222,7 +210,8 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Pr
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		initialWidth = w
 	}
-	renderer, err := buildRenderer(cfg.Settings.Theme, initialWidth)
+
+	tab, err := newTabSession(cfg, client, initialWidth)
 	if err != nil {
 		return Model{}, err
 	}
@@ -263,41 +252,17 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Pr
 	}
 
 	return Model{
-		cfg:              cfg,
-		client:           client,
-		history:          chat.NewHistory(),
-		store:            store,
-		renderer:         renderer,
-		cfgPath:          cfgPath,
-		shortcutsPath:    shortcutsPath,
-		theme:            ThemeByName(cfg.Settings.Theme),
-		autoSaveName:     time.Now().Format("2006-01-02_150405"),
-		mode:             initialMode,
-		rolesPath:        rolesPath,
-		rolePick:         rolePick,
-		configEd:         initConfigEd,
-		viewport:         viewport.New(0, 0),
-		chatFollowBottom: true,
-		textarea: func() textarea.Model {
-			ta := textarea.New()
-			ta.Placeholder = "Message... (Shift+Enter for newline)"
-			ta.Focus()
-			ta.SetHeight(3)
-			ta.ShowLineNumbers = false
-			ta.KeyMap.InsertNewline.SetKeys("shift+enter")
-			ta.FocusedStyle.Base = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("62"))
-			ta.BlurredStyle.Base = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("240"))
-			return ta
-		}(),
-		spinner: func() spinner.Model {
-			s := spinner.New()
-			s.Spinner = spinner.Dot
-			return s
-		}(),
+		cfg:           cfg,
+		store:         store,
+		cfgPath:       cfgPath,
+		shortcutsPath: shortcutsPath,
+		theme:         ThemeByName(cfg.Settings.Theme),
+		mode:          initialMode,
+		rolesPath:     rolesPath,
+		rolePick:      rolePick,
+		configEd:      initConfigEd,
+		tabs:          []TabSession{tab},
+		activeTab:     0,
 	}, nil
 }
 
@@ -313,9 +278,17 @@ func (m Model) Close() {
 
 func (m *Model) recreateRenderer(width int) {
 	r, err := buildRenderer(m.cfg.Settings.Theme, width)
-	if err == nil {
-		m.renderer = r
+	if err != nil {
+		m.statusMsg = "renderer error: " + err.Error()
+		return
 	}
+	m.activeTabSession().renderer = r
+}
+
+// activeTabSession returns a pointer to the active TabSession.
+// Safe to call from both pointer and value receivers.
+func (m Model) activeTabSession() *TabSession {
+	return &m.tabs[m.activeTab]
 }
 
 func markdownWrapWidth(termWidth int) int {

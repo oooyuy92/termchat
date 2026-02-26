@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func (m Model) updateRolePickerMode(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -29,13 +30,13 @@ func (m Model) updateRolePickerMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		role := p.items[p.cursor]
-		m.history.SetSystemPrompt(role.Prompt)
+		m.activeTabSession().history.SetSystemPrompt(role.Prompt)
 		m.activeRole = role.Name
 		m.mode = modeChat
 		return m, nil
 	case "esc":
 		// Use blank system prompt (no role selected)
-		m.history.SetSystemPrompt("")
+		m.activeTabSession().history.SetSystemPrompt("")
 		m.activeRole = ""
 		m.mode = modeChat
 		return m, nil
@@ -50,6 +51,7 @@ func (m Model) updateRolePickerMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewRolePicker() string {
+	tabBar := (&m).renderTabBar()
 	var b strings.Builder
 	p := m.rolePick
 
@@ -61,7 +63,7 @@ func (m Model) viewRolePicker() string {
 		b.WriteString("\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Esc: 跳过"))
 		b.WriteString("\n")
-		return b.String() + "\n" + m.renderStatusBar()
+		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 	}
 
 	for i, role := range p.items {
@@ -83,5 +85,5 @@ func (m Model) viewRolePicker() string {
 	b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: 选择  |  Enter: 确认  |  Esc: 跳过（不使用角色）"))
 	b.WriteString("\n")
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }

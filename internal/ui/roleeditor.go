@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/roles"
 )
 
@@ -173,6 +174,7 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewRolesEditor() string {
+	tabBar := (&m).renderTabBar()
 	var b strings.Builder
 	ed := m.roleEd
 
@@ -186,7 +188,7 @@ func (m Model) viewRolesEditor() string {
 			b.WriteString("\n\n")
 			b.WriteString(m.theme.ConfigHelpStyle().Render("  n: new  |  Esc: back"))
 			b.WriteString("\n")
-			return b.String() + "\n" + m.renderStatusBar()
+			return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 		}
 
 		for i, role := range ed.items {
@@ -284,5 +286,5 @@ func (m Model) viewRolesEditor() string {
 		b.WriteString("\n")
 	}
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }

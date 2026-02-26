@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type clipboardResultMsg struct{ Err error }
@@ -50,7 +51,8 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.confirmQuit = false
 	}
 
-	msgs := m.history.Messages()
+	tab := &m.tabs[m.activeTab]
+	msgs := tab.history.Messages()
 
 	switch msg.String() {
 	case "esc":
@@ -79,44 +81,44 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "enter":
 		// Rollback: keep messages[0..cursor] inclusive
 		n := m.browseCursor + 1
-		m.history.Truncate(n)
-		m.viewport.SetContent(m.buildChatContent())
-		m.viewport.GotoBottom()
-		m.chatFollowBottom = true
+		tab.history.Truncate(n)
+		tab.viewport.SetContent(m.buildChatContent())
+		tab.viewport.GotoBottom()
+		tab.chatFollowBottom = true
 		m.statusMsg = fmt.Sprintf("Rolled back to message %d", n)
 		m.mode = modeChat
-		return m, m.autoSaveCmd()
+		return m, m.autoSaveCmd(m.activeTab)
 
 	case "d":
 		if len(msgs) == 0 {
 			return m, nil
 		}
-		m.history.DeleteAt(m.browseCursor)
-		remaining := m.history.Messages()
+		tab.history.DeleteAt(m.browseCursor)
+		remaining := tab.history.Messages()
 		if len(remaining) == 0 {
-			m.viewport.SetContent(m.buildChatContent())
-			m.viewport.GotoBottom()
-			m.chatFollowBottom = true
+			tab.viewport.SetContent(m.buildChatContent())
+			tab.viewport.GotoBottom()
+			tab.chatFollowBottom = true
 			m.mode = modeChat
 			m.statusMsg = "All messages deleted"
-			return m, m.autoSaveCmd()
+			return m, m.autoSaveCmd(m.activeTab)
 		}
 		if m.browseCursor >= len(remaining) {
 			m.browseCursor = len(remaining) - 1
 		}
-		return m, m.autoSaveCmd()
+		return m, m.autoSaveCmd(m.activeTab)
 
 	case "b":
 		// Branch: save history[0..cursor] as a brand-new conversation
 		newName := time.Now().Format("2006-01-02_150405")
-		m.history.Truncate(m.browseCursor + 1)
-		m.autoSaveName = newName
-		m.viewport.SetContent(m.buildChatContent())
-		m.viewport.GotoBottom()
-		m.chatFollowBottom = true
+		tab.history.Truncate(m.browseCursor + 1)
+		tab.autoSaveName = newName
+		tab.viewport.SetContent(m.buildChatContent())
+		tab.viewport.GotoBottom()
+		tab.chatFollowBottom = true
 		m.statusMsg = fmt.Sprintf("Branched at message %d: %s", m.browseCursor+1, newName)
 		m.mode = modeChat
-		return m, m.autoSaveCmd()
+		return m, m.autoSaveCmd(m.activeTab)
 
 	case "c":
 		if m.browseCursor >= 0 && m.browseCursor < len(msgs) {
@@ -128,13 +130,15 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewMessageBrowse() string {
-	msgs := m.history.Messages()
+	tabBar := (&m).renderTabBar()
+	tab := m.activeTabSession()
+	msgs := tab.history.Messages()
 	if len(msgs) == 0 {
 		var b strings.Builder
 		b.WriteString(m.theme.ConfigTitleStyle().Render("Browse Messages") + "\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  No messages.") + "\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Esc: back") + "\n")
-		return b.String() + "\n" + m.renderStatusBar()
+		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 	}
 
 	cur := m.browseCursor
@@ -156,7 +160,7 @@ func (m Model) viewMessageBrowse() string {
 	// Full message content
 	var content string
 	if selected.Role == "assistant" {
-		rendered, err := m.renderer.Render(selected.Content)
+		rendered, err := tab.renderer.Render(selected.Content)
 		if err != nil {
 			content = selected.Content
 		} else {
@@ -167,8 +171,8 @@ func (m Model) viewMessageBrowse() string {
 	}
 
 	// Clip content to available height to avoid overflow
-	// Available lines = total height - header(2) - blank(1) - divider(1) - help(1) - status(1) - blank(1)
-	availableLines := m.height - 7
+	// Available lines = total height - tabbar(1) - header(2) - blank(1) - divider(1) - help(1) - status(1) - blank(1)
+	availableLines := m.height - 8
 	if availableLines < 1 {
 		availableLines = 1
 	}
@@ -194,5 +198,5 @@ func (m Model) viewMessageBrowse() string {
 		"↑↓: prev/next  Enter: rollback  d: delete  b: branch  c: copy  Esc: back",
 	) + "\n")
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }
