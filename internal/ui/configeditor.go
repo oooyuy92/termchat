@@ -160,6 +160,10 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			field.Value = ed.editBuf
 			applyFieldToConfig(&m.cfg, field.Key, ed.editBuf)
 			applyConfigToClient(m.activeTabSession().client, m.cfg)
+			// Update tab name when model changes
+			if field.Key == "model" {
+				m.activeTabSession().name = m.cfg.API.Model
+			}
 			// Sync theme if theme field was changed
 			m.theme = ThemeByName(m.cfg.Settings.Theme)
 			if field.Key == "theme" {
@@ -229,6 +233,7 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 					}
 				}
 				m.activeTabSession().client = chat.NewProvider(m.cfg.API.Provider, m.cfg.API.BaseURL, m.cfg.API.APIKey, m.cfg.API.Model)
+				m.activeTabSession().name = m.cfg.API.Model
 			} else {
 				applyConfigToClient(m.activeTabSession().client, m.cfg)
 			}

@@ -563,6 +563,7 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		}
 		m.activeTabSession().client.SetModel(parts[1])
 		m.cfg.API.Model = parts[1]
+		m.activeTabSession().name = parts[1]
 		m.statusMsg = "Model set to " + parts[1]
 		return m, m.saveConfigCmd()
 
