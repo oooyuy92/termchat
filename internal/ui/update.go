@@ -39,6 +39,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Tab management — global shortcuts
+		switch msg.String() {
+		case "ctrl+t":
+			cmd := m.newTab()
+			return m, cmd
+		case "ctrl+w":
+			m.closeTab(m.activeTab)
+			return m, nil
+		}
+
 		if m.mode == modeConfig {
 			return m.updateConfigMode(msg)
 		}
@@ -326,6 +336,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+
+func (m *Model) newTab() tea.Cmd {
+	tab, err := newTabSession(m.cfg, m.tabs[m.activeTab].client, m.width)
+	if err != nil {
+		m.statusMsg = "Failed to create tab: " + err.Error()
+		return nil
+	}
+	m.tabs = append(m.tabs, tab)
+	m.activeTab = len(m.tabs) - 1
+	m.statusMsg = ""
+	return nil
+}
+
+func (m *Model) closeTab(idx int) {
+	if len(m.tabs) <= 1 {
+		m.statusMsg = "Cannot close last tab"
+		return
+	}
+	// Cancel in-flight stream
+	if m.tabs[idx].streamCtrl != nil {
+		m.tabs[idx].streamCtrl.cancel()
+	}
+	m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
+	if m.activeTab >= len(m.tabs) {
+		m.activeTab = len(m.tabs) - 1
+	} else if m.activeTab > idx {
+		m.activeTab--
+	}
+	// Refresh viewport content for newly active tab
+	m.tabs[m.activeTab].viewport.SetContent(m.buildChatContent())
+}
 
 // looksLikeSGRMouse reports whether s contains an SGR mouse sequence
 // (e.g. "<65;43;25M") that leaked through as key runes.
