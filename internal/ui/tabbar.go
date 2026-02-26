@@ -16,8 +16,9 @@ func (m *Model) renderTabBar() string {
 	newBtnWidth := xansi.StringWidth(newBtn)
 
 	type tabInfo struct {
-		label string
-		width int
+		label     string
+		width     int
+		nameWidth int
 	}
 	infos := make([]tabInfo, len(m.tabs))
 	for i, t := range m.tabs {
@@ -27,8 +28,9 @@ func (m *Model) renderTabBar() string {
 			name = string(runes[:maxNameRunes-1]) + "…"
 		}
 		label := name + " ×"
-		w := xansi.StringWidth(label) + 2 // +2 for padding(0,1) adds 1 on each side
-		infos[i] = tabInfo{label: label, width: w}
+		nw := xansi.StringWidth(name)
+		w := nw + xansi.StringWidth(" ×") + 2 // +2 for padding(0,1) adds 1 on each side
+		infos[i] = tabInfo{label: label, width: w, nameWidth: nw}
 	}
 
 	// Determine how many tabs fit; reserve room for [+] and optionally […]
@@ -38,15 +40,20 @@ func (m *Model) renderTabBar() string {
 	used := 0
 	for i, info := range infos {
 		need := info.width
-		remainingWidth := 0
-		for _, fi := range infos[i+1:] {
-			remainingWidth += fi.width
-		}
-		if remainingWidth > 0 && used+need+overflowBtnWidth > available {
-			break
-		}
 		if used+need > available {
 			break
+		}
+		// Would remaining tabs after this one fit without overflow?
+		if i < len(infos)-1 {
+			remainingAfter := 0
+			for _, fi := range infos[i+1:] {
+				remainingAfter += fi.width
+			}
+			// If remaining tabs won't all fit, we'll need an overflow button
+			// Reserve space for it starting from this tab's inclusion
+			if used+need+remainingAfter > available && used+need+overflowBtnWidth > available {
+				break
+			}
 		}
 		used += need
 		visibleCount++
@@ -73,16 +80,17 @@ func (m *Model) renderTabBar() string {
 		sb.WriteString(rendered)
 
 		endX := x + info.width
-		// The "×" is the last 2 chars of label (space + ×), closeOffset points to where " ×" starts
-		closeOffset := info.width - 2
+		// tab layout: [1 pad][name][space][×][1 pad]
+		// close zone starts at the space before ×: 1 + nameWidth
+		closeStartX := startX + 1 + info.nameWidth // 1 = left padding
 		zones = append(zones, tabHitZone{
 			startX: startX,
-			endX:   startX + closeOffset - 1,
+			endX:   closeStartX - 1,
 			action: tabHitSelect,
 			tabIdx: i,
 		})
 		zones = append(zones, tabHitZone{
-			startX: startX + closeOffset,
+			startX: closeStartX,
 			endX:   endX - 1,
 			action: tabHitClose,
 			tabIdx: i,
@@ -101,7 +109,11 @@ func (m *Model) renderTabBar() string {
 
 	// […] overflow button
 	if hiddenCount > 0 {
-		overflowLabel := fmt.Sprintf(" … %d ", hiddenCount)
+		displayCount := hiddenCount
+		if displayCount > 99 {
+			displayCount = 99
+		}
+		overflowLabel := fmt.Sprintf(" … %d ", displayCount)
 		overflowW := xansi.StringWidth(overflowLabel)
 		overflowRendered := lipgloss.NewStyle().
 			Background(lipgloss.Color(m.theme.TabBarBg)).
