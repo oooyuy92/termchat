@@ -4,10 +4,10 @@ package ui
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/roles"
 	"github.com/termchat/termchat/internal/shortcuts"
@@ -21,6 +21,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		if msg.Width > 0 {
 			m.recreateRenderer(msg.Width)
+		}
+		// viewport height = total height - 1 (input line) - 1 (status bar)
+		vpHeight := msg.Height - 2
+		if vpHeight < 1 {
+			vpHeight = 1
+		}
+		m.viewport.Width = msg.Width
+		m.viewport.Height = vpHeight
+		m.textarea.SetWidth(msg.Width)
+		// Re-render content at new size
+		m.viewport.SetContent(m.buildChatContent())
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
 		}
 		return m, nil
 
@@ -51,8 +64,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.streaming {
-			if m.handleChatScrollKey(msg.String()) {
-				return m, nil
+			if isScrollKey(msg.String()) {
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(msg)
+				m.chatFollowBottom = m.viewport.AtBottom()
+				return m, cmd
 			}
 			if msg.String() == "ctrl+c" {
 				if m.confirmQuit {
@@ -65,6 +81,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.streaming = false
 				m.currentResp = ""
 				m.currentThinking = ""
+				m.viewport.SetContent(m.buildChatContent())
+				if m.chatFollowBottom {
+					m.viewport.GotoBottom()
+				}
 				m.confirmQuit = true
 				m.statusMsg = "Press Ctrl+C again to quit"
 				return m, nil
@@ -83,8 +103,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "up", "down", "pgup", "pgdown", "home", "end":
-			m.handleChatScrollKey(msg.String())
-			return m, nil
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			m.chatFollowBottom = m.viewport.AtBottom()
+			return m, cmd
 
 		case "esc":
 			m.escCount++
@@ -110,11 +132,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
-			input := strings.TrimSpace(m.input)
+			input := strings.TrimSpace(m.textarea.Value())
 			if input == "" {
 				return m, nil
 			}
-			m.input = ""
+			m.textarea.Reset()
 
 			if strings.HasPrefix(input, "/") {
 				return m.handleCommand(input)
@@ -130,49 +152,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			m.streamCtrl = &streamControl{cancel: cancel}
+			m.viewport.SetContent(m.buildChatContent())
+			m.viewport.GotoBottom()
 
-			return m, m.sendStreamCmd(ctx)
-
-		case "backspace":
-			runes := []rune(m.input)
-			if len(runes) > 0 {
-				m.input = string(runes[:len(runes)-1])
-			}
+			return m, tea.Batch(m.sendStreamCmd(ctx), m.spinner.Tick)
 
 		case "ctrl+v":
 			return m, m.pasteFromClipboard()
 
 		default:
-			if msg.Type == tea.KeyRunes {
-				raw := string(msg.Runes)
-				// Some terminal/tmux combinations leak SGR mouse bytes as runes
-				// (e.g. "<65;43;25M"). Swallow them so they don't pollute input.
-				if m.handleMouseFallbackRunes(raw) {
-					return m, nil
-				}
-				m.input += raw
-				// Enter slash autocomplete mode when "/" is typed as the first character
-				if m.input == "/" {
-					m.mode = modeSlashComplete
-					m.slashAC = slashComplete{
-						matches: filterSlashCmds("/"),
-						cursor:  0,
-						offset:  0,
-					}
+			var cmd tea.Cmd
+			m.textarea, cmd = m.textarea.Update(msg)
+			// Enter slash autocomplete mode when "/" is typed as the first character
+			if m.textarea.Value() == "/" {
+				m.mode = modeSlashComplete
+				m.slashAC = slashComplete{
+					matches: filterSlashCmds("/"),
+					cursor:  0,
+					offset:  0,
 				}
 			}
+			return m, cmd
+		}
+		return m, nil
+
+	case spinner.TickMsg:
+		if m.streaming {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
+	case tea.MouseMsg:
+		if m.mode == modeChat {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			m.chatFollowBottom = m.viewport.AtBottom()
+			return m, cmd
 		}
 		return m, nil
 
 	case streamChunkMsg:
 		m.currentResp += msg.Content
 		m.currentThinking += msg.Thinking
+		m.viewport.SetContent(m.buildChatContent())
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
+		}
 		return m, m.readNextChunk()
 
 	case streamStartMsg:
 		m.streamCh = msg.chunks
 		m.streamErr = msg.errs
-		return m, m.readNextChunk()
+		return m, tea.Batch(m.readNextChunk(), m.spinner.Tick)
 
 	case streamDoneMsg:
 		m.streaming = false
@@ -182,6 +215,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.currentResp = ""
 		m.currentThinking = ""
+		m.viewport.SetContent(m.buildChatContent())
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
+		}
 		return m, m.autoSaveCmd()
 
 	case streamErrMsg:
@@ -190,6 +227,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.Err
 		m.currentResp = ""
 		m.currentThinking = ""
+		m.viewport.SetContent(m.buildChatContent())
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
+		}
 		return m, nil
 
 	case commandResultMsg:
@@ -242,12 +283,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Image != nil {
 			m.imageCounter++
 			m.pendingImages = append(m.pendingImages, *msg.Image)
-			m.input += fmt.Sprintf("[image %d]", m.imageCounter)
+			m.textarea.InsertString(fmt.Sprintf("[image %d]", m.imageCounter))
 			m.statusMsg = fmt.Sprintf("Image %d pasted", m.imageCounter)
 			return m, nil
 		}
-		m.input += msg.Text
-		if m.input == "/" {
+		m.textarea.InsertString(msg.Text)
+		if m.textarea.Value() == "/" {
 			m.mode = modeSlashComplete
 			m.slashAC = slashComplete{
 				matches: filterSlashCmds("/"),
@@ -261,113 +302,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouseFallbackRunes parses mouse SGR fragments that may arrive as text
-// and converts wheel events into chat scrolling.
-func (m *Model) handleMouseFallbackRunes(raw string) bool {
-	handled := false
-	for i := 0; i < len(raw); i++ {
-		if raw[i] != '<' {
-			continue
-		}
-		j := i + 1
-		for j < len(raw) {
-			c := raw[j]
-			if (c >= '0' && c <= '9') || c == ';' {
-				j++
-				continue
-			}
-			break
-		}
-		if j >= len(raw) || (raw[j] != 'M' && raw[j] != 'm') || j == i+1 {
-			continue
-		}
 
-		parts := strings.Split(raw[i+1:j], ";")
-		if len(parts) != 3 {
-			handled = true
-			i = j
-			continue
-		}
-		btn, err := strconv.Atoi(parts[0])
-		if err == nil {
-			// xterm mouse encoding puts modifiers on top of base button code.
-			baseBtn := btn &^ (4 | 8 | 16)
-			switch baseBtn {
-			case 64:
-				m.scrollChatBy(-3)
-			case 65:
-				m.scrollChatBy(3)
-			}
-		}
-		handled = true
-		i = j
-	}
-	return handled
+// looksLikeSGRMouse reports whether s contains an SGR mouse sequence
+// (e.g. "<65;43;25M") that leaked through as key runes.
+func looksLikeSGRMouse(s string) bool {
+	return len(s) > 3 && s[0] == '<'
 }
 
-func (m Model) maxChatScrollTop() int {
-	return m.maxChatScrollForContent(m.buildChatContent())
-}
-
-func (m *Model) scrollChatBy(delta int) bool {
-	maxTop := m.maxChatScrollTop()
-	if maxTop == 0 {
-		m.chatScrollTop = 0
-		m.chatFollowBottom = true
-		return false
-	}
-
-	oldTop := m.chatScrollTop
-	oldFollow := m.chatFollowBottom
-
-	m.chatFollowBottom = false
-	m.chatScrollTop += delta
-	if m.chatScrollTop < 0 {
-		m.chatScrollTop = 0
-	}
-	if m.chatScrollTop > maxTop {
-		m.chatScrollTop = maxTop
-	}
-	if m.chatScrollTop == maxTop {
-		m.chatFollowBottom = true
-	}
-	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
-}
-
-func (m *Model) scrollChatToTop() bool {
-	oldTop := m.chatScrollTop
-	oldFollow := m.chatFollowBottom
-	m.chatScrollTop = 0
-	m.chatFollowBottom = false
-	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
-}
-
-func (m *Model) scrollChatToBottom() bool {
-	maxTop := m.maxChatScrollTop()
-	oldTop := m.chatScrollTop
-	oldFollow := m.chatFollowBottom
-	m.chatScrollTop = maxTop
-	m.chatFollowBottom = true
-	return oldTop != m.chatScrollTop || oldFollow != m.chatFollowBottom
-}
-
-func (m *Model) handleChatScrollKey(key string) bool {
+func isScrollKey(key string) bool {
 	switch key {
-	case "up":
-		return m.scrollChatBy(-1)
-	case "down":
-		return m.scrollChatBy(1)
-	case "pgup":
-		return m.scrollChatBy(-(m.chatViewportHeight() - 1))
-	case "pgdown":
-		return m.scrollChatBy(m.chatViewportHeight() - 1)
-	case "home":
-		return m.scrollChatToTop()
-	case "end":
-		return m.scrollChatToBottom()
-	default:
-		return false
+	case "up", "down", "pgup", "pgdown", "home", "end":
+		return true
 	}
+	return false
 }
 
 func (m Model) sendStreamCmd(ctx context.Context) tea.Cmd {
@@ -449,8 +396,9 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		m.totalTokens = 0
 		m.pendingImages = nil
 		m.imageCounter = 0
-		m.chatScrollTop = 0
 		m.chatFollowBottom = true
+		m.viewport.SetContent("")
+		m.viewport.GotoBottom()
 		m.statusMsg = "Conversation cleared"
 		return m, nil
 

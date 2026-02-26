@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/muesli/reflow/wrap"
 )
@@ -68,54 +69,6 @@ func hardWrapRenderedMarkdown(s string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) chatViewportHeight() int {
-	// Keep one line for the status bar.
-	h := m.height - 1
-	if h < 1 {
-		return 1
-	}
-	return h
-}
-
-func (m Model) maxChatScrollForContent(content string) int {
-	totalLines := strings.Count(content, "\n") + 1
-	viewportHeight := m.chatViewportHeight()
-	if totalLines <= viewportHeight {
-		return 0
-	}
-	return totalLines - viewportHeight
-}
-
-func (m Model) renderChatViewport(content string) string {
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 {
-		return ""
-	}
-
-	viewportHeight := m.chatViewportHeight()
-	maxTop := m.maxChatScrollForContent(content)
-
-	top := m.chatScrollTop
-	if m.chatFollowBottom {
-		top = maxTop
-	}
-	if top < 0 {
-		top = 0
-	}
-	if top > maxTop {
-		top = maxTop
-	}
-
-	end := top + viewportHeight
-	if end > len(lines) {
-		end = len(lines)
-	}
-	if end < top {
-		end = top
-	}
-	return strings.Join(lines[top:end], "\n")
-}
-
 func (m Model) buildChatContent() string {
 	var b strings.Builder
 
@@ -157,17 +110,11 @@ func (m Model) buildChatContent() string {
 				b.WriteString(cleaned + "\n")
 			}
 		}
-		b.WriteString("\u2588\n")
 	}
 
 	// Render error.
 	if m.err != nil {
 		b.WriteString(m.theme.ErrStyle().Render(fmt.Sprintf("Error: %v", m.err)) + "\n")
-	}
-
-	// Input area.
-	if !m.streaming {
-		b.WriteString(m.theme.InputPromptStyle().Render("> ") + m.input)
 	}
 
 	return b.String()
@@ -199,6 +146,34 @@ func (m Model) View() string {
 		return m.viewMessageBrowse()
 	}
 
-	content := m.buildChatContent()
-	return m.renderChatViewport(content) + "\n" + m.renderStatusBar()
+	statusBar := m.renderStatusBar()
+	inputArea := m.textarea.View()
+
+	// Spinner line: shown only during streaming
+	spinnerLine := ""
+	if m.streaming {
+		spinnerLine = m.theme.SpinnerStyle().Render(m.spinner.View() + " 生成中...")
+	}
+
+	// Dynamic viewport height
+	vpHeight := m.height - lipgloss.Height(statusBar) - lipgloss.Height(inputArea)
+	if spinnerLine != "" {
+		vpHeight -= lipgloss.Height(spinnerLine)
+	}
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	if m.viewport.Height != vpHeight {
+		m.viewport.Height = vpHeight
+		if m.chatFollowBottom {
+			m.viewport.GotoBottom()
+		}
+	}
+
+	parts := []string{m.viewport.View()}
+	if spinnerLine != "" {
+		parts = append(parts, spinnerLine)
+	}
+	parts = append(parts, inputArea, statusBar)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
