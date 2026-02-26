@@ -147,6 +147,9 @@ func (m Model) View() string {
 	if m.mode == modeMessageBrowse {
 		return m.viewMessageBrowse()
 	}
+	if m.mode == modeTabOverflow {
+		return m.viewTabOverflow()
+	}
 
 	tabBar := (&m).renderTabBar()
 	statusBar := m.renderStatusBar()

@@ -42,6 +42,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeTabRename {
 			return m.updateTabRenameMode(msg)
 		}
+		if m.mode == modeTabOverflow {
+			return m.updateTabOverflow(msg)
+		}
 
 		// Tab management — global shortcuts
 		switch msg.String() {
