@@ -9,9 +9,10 @@ import (
 )
 
 func (m Model) renderStatusBar() string {
-	model := m.theme.StatusKeyStyle().Render("model") + m.theme.StatusBarStyle().Render(m.client.Model())
-	tokens := m.theme.StatusKeyStyle().Render("tokens") + m.theme.StatusBarStyle().Render(fmt.Sprintf("%d", m.totalTokens))
-	msgs := m.theme.StatusKeyStyle().Render("msgs") + m.theme.StatusBarStyle().Render(fmt.Sprintf("%d", m.history.Count()))
+	tab := m.activeTabSession()
+	model := m.theme.StatusKeyStyle().Render("model") + m.theme.StatusBarStyle().Render(tab.client.Model())
+	tokens := m.theme.StatusKeyStyle().Render("tokens") + m.theme.StatusBarStyle().Render(fmt.Sprintf("%d", tab.totalTokens))
+	msgs := m.theme.StatusKeyStyle().Render("msgs") + m.theme.StatusBarStyle().Render(fmt.Sprintf("%d", tab.history.Count()))
 
 	roleDisplay := ""
 	if m.activeRole != "" {

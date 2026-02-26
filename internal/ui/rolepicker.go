@@ -29,13 +29,13 @@ func (m Model) updateRolePickerMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		role := p.items[p.cursor]
-		m.history.SetSystemPrompt(role.Prompt)
+		m.activeTabSession().history.SetSystemPrompt(role.Prompt)
 		m.activeRole = role.Name
 		m.mode = modeChat
 		return m, nil
 	case "esc":
 		// Use blank system prompt (no role selected)
-		m.history.SetSystemPrompt("")
+		m.activeTabSession().history.SetSystemPrompt("")
 		m.activeRole = ""
 		m.mode = modeChat
 		return m, nil

@@ -17,26 +17,30 @@ func testChatModel() Model {
 	ta.Focus()
 	ta.ShowLineNumbers = false
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter")
-	return Model{
-		mode:             modeChat,
-		theme:            DarkTheme,
+	tab := TabSession{
 		history:          h,
-		height:           8,
 		chatFollowBottom: true,
 		textarea:         ta,
+	}
+	return Model{
+		mode:      modeChat,
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		height:    8,
 	}
 }
 
 func TestUpdateIgnoresMouseFallbackRunesInInput(t *testing.T) {
 	m := testChatModel()
-	m.textarea.SetValue("hello")
+	m.tabs[m.activeTab].textarea.SetValue("hello")
 
 	// SGR mouse sequence leaked as runes — textarea should delegate to its own handler
 	// The key point is the value doesn't get corrupted with SGR bytes
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	updated := next.(Model)
 
-	val := updated.textarea.Value()
+	val := updated.tabs[updated.activeTab].textarea.Value()
 	if val == "" {
 		t.Fatalf("expected textarea to have content, got empty string")
 	}
@@ -48,7 +52,7 @@ func TestUpdateAppendsNormalRunes(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("abc")})
 	updated := next.(Model)
 
-	val := updated.textarea.Value()
+	val := updated.tabs[updated.activeTab].textarea.Value()
 	if val == "" {
 		t.Fatalf("expected normal input to be appended, got empty string")
 	}

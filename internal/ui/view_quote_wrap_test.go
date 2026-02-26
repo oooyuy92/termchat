@@ -37,12 +37,16 @@ func TestBuildChatContentQuoteWrapKeepsPrefix(t *testing.T) {
 		Content: "> " + strings.Repeat("汉", 80),
 	})
 
-	m := Model{
-		theme:    DarkTheme,
+	tab := TabSession{
 		history:  history,
 		renderer: renderer,
 		client:   &stubProvider{model: "test-model"},
-		width:    24,
+	}
+	m := Model{
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     24,
 	}
 
 	out := xansi.Strip(m.buildChatContent())
@@ -76,12 +80,16 @@ func TestBuildChatContentNestedQuoteWrapKeepsIndentedPrefix(t *testing.T) {
 			"  > " + strings.Repeat("汉", 80),
 	})
 
-	m := Model{
-		theme:    DarkTheme,
+	tab := TabSession{
 		history:  history,
 		renderer: renderer,
 		client:   &stubProvider{model: "test-model"},
-		width:    24,
+	}
+	m := Model{
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     24,
 	}
 
 	out := xansi.Strip(m.buildChatContent())
@@ -116,12 +124,16 @@ func TestBuildChatContentLazyQuoteContinuationKeepsPrefix(t *testing.T) {
 			strings.Repeat("乙", 40),
 	})
 
-	m := Model{
-		theme:    DarkTheme,
+	tab := TabSession{
 		history:  history,
 		renderer: renderer,
 		client:   &stubProvider{model: "test-model"},
-		width:    24,
+	}
+	m := Model{
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     24,
 	}
 
 	out := xansi.Strip(m.buildChatContent())
@@ -156,12 +168,16 @@ func TestBuildChatContentLeavesHeadroomToAvoidTerminalSoftWrap(t *testing.T) {
 			"基线模型选择（Baseline）、评估指标（Metrics）以及消融实验（Ablation Study）的设计建议。",
 	})
 
-	m := Model{
-		theme:    DarkTheme,
+	tab := TabSession{
 		history:  history,
 		renderer: renderer,
 		client:   &stubProvider{model: "test-model"},
-		width:    width,
+	}
+	m := Model{
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     width,
 	}
 
 	out := xansi.Strip(m.buildChatContent())

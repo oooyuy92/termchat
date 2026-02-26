@@ -101,16 +101,16 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.mode = modeChat
 			return m, nil
 		}
-		m.autoSaveName = conv.Name
-		m.history.Clear()
-		m.history.SetSystemPrompt("")
+		m.activeTabSession().autoSaveName = conv.Name
+		m.activeTabSession().history.Clear()
+		m.activeTabSession().history.SetSystemPrompt("")
 		m.activeRole = ""
 		for _, msg := range msgs {
-			m.history.Add(msg)
+			m.activeTabSession().history.Add(msg)
 		}
-		m.viewport.SetContent(m.buildChatContent())
-		m.viewport.GotoBottom()
-		m.chatFollowBottom = true
+		m.activeTabSession().viewport.SetContent(m.buildChatContent())
+		m.activeTabSession().viewport.GotoBottom()
+		m.activeTabSession().chatFollowBottom = true
 		m.mode = modeChat
 		m.statusMsg = "Resumed: " + conv.Name
 	case "esc":
@@ -145,8 +145,8 @@ func (m Model) updateExportPick(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// If exporting the currently active conversation, use in-memory history
 		// to avoid missing the last message (autoSave is async).
 		var msgs []chat.Message
-		if conv.Name == m.autoSaveName {
-			msgs = m.history.Messages()
+		if conv.Name == m.activeTabSession().autoSaveName {
+			msgs = m.activeTabSession().history.Messages()
 		} else {
 			var err error
 			msgs, err = m.store.Load(conv.Name)

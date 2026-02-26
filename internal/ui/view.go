@@ -72,15 +72,17 @@ func hardWrapRenderedMarkdown(s string, width int) string {
 func (m Model) buildChatContent() string {
 	var b strings.Builder
 
+	tab := m.activeTabSession()
+
 	// Render conversation history.
-	for _, msg := range m.history.Messages() {
+	for _, msg := range tab.history.Messages() {
 		switch msg.Role {
 		case "user":
 			block := m.theme.UserLabelStyle().Render("You:") + "\n" + msg.Content
 			b.WriteString(m.theme.UserMsgStyle(m.width).Render(block) + "\n\n")
 		case "assistant":
-			b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
-			rendered, err := m.renderer.Render(msg.Content)
+			b.WriteString(m.theme.AssistantLabelStyle().Render(tab.client.Model()+":") + "\n")
+			rendered, err := tab.renderer.Render(msg.Content)
 			if err != nil {
 				b.WriteString(msg.Content + "\n\n")
 			} else {
@@ -94,16 +96,16 @@ func (m Model) buildChatContent() string {
 	}
 
 	// Render current streaming response.
-	if m.streaming {
-		b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
-		if m.currentThinking != "" {
-			thinking := strings.ReplaceAll(strings.TrimSpace(m.currentThinking), "\n\n", "\n")
+	if tab.streaming {
+		b.WriteString(m.theme.AssistantLabelStyle().Render(tab.client.Model()+":") + "\n")
+		if tab.currentThinking != "" {
+			thinking := strings.ReplaceAll(strings.TrimSpace(tab.currentThinking), "\n\n", "\n")
 			b.WriteString(m.theme.ThinkingStyle().Render("\U0001f4ad "+thinking) + "\n")
 		}
-		if m.currentResp != "" {
-			rendered, err := m.renderer.Render(m.currentResp)
+		if tab.currentResp != "" {
+			rendered, err := tab.renderer.Render(tab.currentResp)
 			if err != nil {
-				b.WriteString(m.currentResp)
+				b.WriteString(tab.currentResp)
 			} else {
 				cleaned := cleanGlamourOutput(rendered)
 				cleaned = hardWrapRenderedMarkdown(cleaned, m.width)
@@ -113,8 +115,8 @@ func (m Model) buildChatContent() string {
 	}
 
 	// Render error.
-	if m.err != nil {
-		b.WriteString(m.theme.ErrStyle().Render(fmt.Sprintf("Error: %v", m.err)) + "\n")
+	if tab.err != nil {
+		b.WriteString(m.theme.ErrStyle().Render(fmt.Sprintf("Error: %v", tab.err)) + "\n")
 	}
 
 	return b.String()
@@ -147,12 +149,13 @@ func (m Model) View() string {
 	}
 
 	statusBar := m.renderStatusBar()
-	inputArea := m.textarea.View()
+	tab2 := m.activeTabSession()
+	inputArea := tab2.textarea.View()
 
 	// Spinner line: shown only during streaming
 	spinnerLine := ""
-	if m.streaming {
-		spinnerLine = m.theme.SpinnerStyle().Render(m.spinner.View() + " 生成中...")
+	if tab2.streaming {
+		spinnerLine = m.theme.SpinnerStyle().Render(tab2.spinner.View() + " 生成中...")
 	}
 
 	// Dynamic viewport height
@@ -163,14 +166,14 @@ func (m Model) View() string {
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
-	if m.viewport.Height != vpHeight {
-		m.viewport.Height = vpHeight
-		if m.chatFollowBottom {
-			m.viewport.GotoBottom()
+	if tab2.viewport.Height != vpHeight {
+		tab2.viewport.Height = vpHeight
+		if tab2.chatFollowBottom {
+			tab2.viewport.GotoBottom()
 		}
 	}
 
-	parts := []string{m.viewport.View()}
+	parts := []string{tab2.viewport.View()}
 	if spinnerLine != "" {
 		parts = append(parts, spinnerLine)
 	}

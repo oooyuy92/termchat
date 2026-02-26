@@ -42,7 +42,7 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if len(ed.items) == 0 {
 				return m, nil
 			}
-			m.textarea.SetValue(ed.items[ed.cursor].Content)
+			m.tabs[m.activeTab].textarea.SetValue(ed.items[ed.cursor].Content)
 			m.mode = modeChat
 			m.statusMsg = "Shortcut loaded"
 			return m, nil

@@ -27,13 +27,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if vpHeight < 1 {
 			vpHeight = 1
 		}
-		m.viewport.Width = msg.Width
-		m.viewport.Height = vpHeight
-		m.textarea.SetWidth(msg.Width)
+		tab := &m.tabs[m.activeTab]
+		tab.viewport.Width = msg.Width
+		tab.viewport.Height = vpHeight
+		tab.textarea.SetWidth(msg.Width)
 		// Re-render content at new size
-		m.viewport.SetContent(m.buildChatContent())
-		if m.chatFollowBottom {
-			m.viewport.GotoBottom()
+		tab.viewport.SetContent(m.buildChatContent())
+		if tab.chatFollowBottom {
+			tab.viewport.GotoBottom()
 		}
 		return m, nil
 
@@ -63,11 +64,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateMessageBrowse(msg)
 		}
 
-		if m.streaming {
+		tab := &m.tabs[m.activeTab]
+		if tab.streaming {
 			if isScrollKey(msg.String()) {
 				var cmd tea.Cmd
-				m.viewport, cmd = m.viewport.Update(msg)
-				m.chatFollowBottom = m.viewport.AtBottom()
+				tab.viewport, cmd = tab.viewport.Update(msg)
+				tab.chatFollowBottom = tab.viewport.AtBottom()
 				return m, cmd
 			}
 			if msg.String() == "ctrl+c" {
@@ -75,15 +77,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				}
 				// Cancel the in-flight HTTP request
-				if m.streamCtrl != nil {
-					m.streamCtrl.cancel()
+				if tab.streamCtrl != nil {
+					tab.streamCtrl.cancel()
 				}
-				m.streaming = false
-				m.currentResp = ""
-				m.currentThinking = ""
-				m.viewport.SetContent(m.buildChatContent())
-				if m.chatFollowBottom {
-					m.viewport.GotoBottom()
+				tab.streaming = false
+				tab.currentResp = ""
+				tab.currentThinking = ""
+				tab.viewport.SetContent(m.buildChatContent())
+				if tab.chatFollowBottom {
+					tab.viewport.GotoBottom()
 				}
 				m.confirmQuit = true
 				m.statusMsg = "Press Ctrl+C again to quit"
@@ -104,19 +106,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "up", "down", "pgup", "pgdown", "home", "end":
 			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
-			m.chatFollowBottom = m.viewport.AtBottom()
+			tab.viewport, cmd = tab.viewport.Update(msg)
+			tab.chatFollowBottom = tab.viewport.AtBottom()
 			return m, cmd
 
 		case "esc":
 			m.escCount++
 			if m.escCount >= 2 {
 				m.escCount = 0
-				if len(m.history.Messages()) == 0 {
+				if len(tab.history.Messages()) == 0 {
 					m.statusMsg = "No messages to browse"
 					return m, nil
 				}
-				m.browseCursor = len(m.history.Messages()) - 1
+				m.browseCursor = len(tab.history.Messages()) - 1
 				m.mode = modeMessageBrowse
 			} else {
 				m.statusMsg = "Press Esc again to browse messages"
@@ -132,39 +134,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
-			input := strings.TrimSpace(m.textarea.Value())
+			input := strings.TrimSpace(tab.textarea.Value())
 			if input == "" {
 				return m, nil
 			}
-			m.textarea.Reset()
+			tab.textarea.Reset()
 
 			if strings.HasPrefix(input, "/") {
 				return m.handleCommand(input)
 			}
 
-			m.history.Add(chat.Message{Role: "user", Content: input, Images: m.pendingImages})
-			m.pendingImages = nil
-			m.streaming = true
-			m.chatFollowBottom = true
-			m.currentResp = ""
-			m.currentThinking = ""
-			m.err = nil
+			tab.history.Add(chat.Message{Role: "user", Content: input, Images: tab.pendingImages})
+			tab.pendingImages = nil
+			tab.streaming = true
+			tab.chatFollowBottom = true
+			tab.currentResp = ""
+			tab.currentThinking = ""
+			tab.err = nil
 
 			ctx, cancel := context.WithCancel(context.Background())
-			m.streamCtrl = &streamControl{cancel: cancel}
-			m.viewport.SetContent(m.buildChatContent())
-			m.viewport.GotoBottom()
+			tab.streamCtrl = &streamControl{cancel: cancel}
+			tab.viewport.SetContent(m.buildChatContent())
+			tab.viewport.GotoBottom()
 
-			return m, tea.Batch(m.sendStreamCmd(ctx), m.spinner.Tick)
+			return m, tea.Batch(m.sendStreamCmd(ctx, m.activeTab), tab.spinner.Tick)
 
 		case "ctrl+v":
 			return m, m.pasteFromClipboard()
 
 		default:
 			var cmd tea.Cmd
-			m.textarea, cmd = m.textarea.Update(msg)
+			tab.textarea, cmd = tab.textarea.Update(msg)
 			// Enter slash autocomplete mode when "/" is typed as the first character
-			if m.textarea.Value() == "/" {
+			if tab.textarea.Value() == "/" {
 				m.mode = modeSlashComplete
 				m.slashAC = slashComplete{
 					matches: filterSlashCmds("/"),
@@ -177,59 +179,80 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.streaming {
+		tab := &m.tabs[m.activeTab]
+		if tab.streaming {
 			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
+			tab.spinner, cmd = tab.spinner.Update(msg)
 			return m, cmd
 		}
 		return m, nil
 
 	case tea.MouseMsg:
 		if m.mode == modeChat {
+			tab := &m.tabs[m.activeTab]
 			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
-			m.chatFollowBottom = m.viewport.AtBottom()
+			tab.viewport, cmd = tab.viewport.Update(msg)
+			tab.chatFollowBottom = tab.viewport.AtBottom()
 			return m, cmd
 		}
 		return m, nil
 
 	case streamChunkMsg:
-		m.currentResp += msg.Content
-		m.currentThinking += msg.Thinking
-		m.viewport.SetContent(m.buildChatContent())
-		if m.chatFollowBottom {
-			m.viewport.GotoBottom()
+		if msg.TabIdx < len(m.tabs) {
+			t := &m.tabs[msg.TabIdx]
+			t.currentResp += msg.Content
+			t.currentThinking += msg.Thinking
+			if msg.TabIdx == m.activeTab {
+				t.viewport.SetContent(m.buildChatContent())
+				if t.chatFollowBottom {
+					t.viewport.GotoBottom()
+				}
+			}
 		}
-		return m, m.readNextChunk()
+		return m, m.readNextChunk(msg.TabIdx)
 
 	case streamStartMsg:
-		m.streamCh = msg.chunks
-		m.streamErr = msg.errs
-		return m, tea.Batch(m.readNextChunk(), m.spinner.Tick)
+		if msg.TabIdx < len(m.tabs) {
+			t := &m.tabs[msg.TabIdx]
+			t.streamCh = msg.chunks
+			t.streamErr = msg.errs
+		}
+		return m, tea.Batch(m.readNextChunk(msg.TabIdx), m.tabs[msg.TabIdx].spinner.Tick)
 
 	case streamDoneMsg:
-		m.streaming = false
-		m.escCount = 0
-		if m.currentResp != "" {
-			m.history.Add(chat.Message{Role: "assistant", Content: m.currentResp})
+		if msg.TabIdx < len(m.tabs) {
+			t := &m.tabs[msg.TabIdx]
+			t.streaming = false
+			if t.currentResp != "" {
+				t.history.Add(chat.Message{Role: "assistant", Content: t.currentResp})
+			}
+			t.currentResp = ""
+			t.currentThinking = ""
+			if msg.TabIdx == m.activeTab {
+				t.viewport.SetContent(m.buildChatContent())
+				if t.chatFollowBottom {
+					t.viewport.GotoBottom()
+				}
+			}
 		}
-		m.currentResp = ""
-		m.currentThinking = ""
-		m.viewport.SetContent(m.buildChatContent())
-		if m.chatFollowBottom {
-			m.viewport.GotoBottom()
+		if msg.TabIdx == m.activeTab {
+			m.escCount = 0
 		}
-		return m, m.autoSaveCmd()
+		return m, m.autoSaveCmd(msg.TabIdx)
 
 	case streamErrMsg:
-		m.streaming = false
-		m.escCount = 0
-		m.err = msg.Err
-		m.currentResp = ""
-		m.currentThinking = ""
-		m.viewport.SetContent(m.buildChatContent())
-		if m.chatFollowBottom {
-			m.viewport.GotoBottom()
+		if msg.TabIdx < len(m.tabs) {
+			t := &m.tabs[msg.TabIdx]
+			t.streaming = false
+			t.err = msg.Err
+			t.currentResp = ""
+			t.currentThinking = ""
+			if msg.TabIdx == m.activeTab {
+				t.viewport.SetContent(m.buildChatContent())
+				if t.chatFollowBottom {
+					t.viewport.GotoBottom()
+				}
+			}
 		}
 		return m, nil
 
@@ -280,15 +303,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Paste failed: " + msg.Err.Error()
 			return m, nil
 		}
+		tab := &m.tabs[m.activeTab]
 		if msg.Image != nil {
-			m.imageCounter++
-			m.pendingImages = append(m.pendingImages, *msg.Image)
-			m.textarea.InsertString(fmt.Sprintf("[image %d]", m.imageCounter))
-			m.statusMsg = fmt.Sprintf("Image %d pasted", m.imageCounter)
+			tab.imageCounter++
+			tab.pendingImages = append(tab.pendingImages, *msg.Image)
+			tab.textarea.InsertString(fmt.Sprintf("[image %d]", tab.imageCounter))
+			m.statusMsg = fmt.Sprintf("Image %d pasted", tab.imageCounter)
 			return m, nil
 		}
-		m.textarea.InsertString(msg.Text)
-		if m.textarea.Value() == "/" {
+		tab.textarea.InsertString(msg.Text)
+		if tab.textarea.Value() == "/" {
 			m.mode = modeSlashComplete
 			m.slashAC = slashComplete{
 				matches: filterSlashCmds("/"),
@@ -317,9 +341,10 @@ func isScrollKey(key string) bool {
 	return false
 }
 
-func (m Model) sendStreamCmd(ctx context.Context) tea.Cmd {
-	messages := m.history.ToAPIMessages()
-	client := m.client
+func (m Model) sendStreamCmd(ctx context.Context, tabIdx int) tea.Cmd {
+	tab := m.tabs[tabIdx]
+	messages := tab.history.ToAPIMessages()
+	client := tab.client
 	temp := m.cfg.Parameters.Temperature
 	maxTok := m.cfg.Parameters.MaxTokens
 	reasoningEffort := m.cfg.Parameters.ReasoningEffort
@@ -327,13 +352,13 @@ func (m Model) sendStreamCmd(ctx context.Context) tea.Cmd {
 
 	return func() tea.Msg {
 		chunks, errs := client.SendStreamChan(ctx, messages, temp, maxTok, reasoningEffort, budgetTokens)
-		return streamStartMsg{chunks: chunks, errs: errs}
+		return streamStartMsg{TabIdx: tabIdx, chunks: chunks, errs: errs}
 	}
 }
 
-func (m Model) readNextChunk() tea.Cmd {
-	ch := m.streamCh
-	errCh := m.streamErr
+func (m Model) readNextChunk(tabIdx int) tea.Cmd {
+	ch := m.tabs[tabIdx].streamCh
+	errCh := m.tabs[tabIdx].streamErr
 	return func() tea.Msg {
 		select {
 		case chunk, ok := <-ch:
@@ -342,29 +367,29 @@ func (m Model) readNextChunk() tea.Cmd {
 				select {
 				case err := <-errCh:
 					if err != nil {
-						return streamErrMsg{Err: err}
+						return streamErrMsg{TabIdx: tabIdx, Err: err}
 					}
 				default:
 				}
-				return streamDoneMsg{}
+				return streamDoneMsg{TabIdx: tabIdx}
 			}
-			return streamChunkMsg{Content: chunk.Content, Thinking: chunk.Thinking}
+			return streamChunkMsg{TabIdx: tabIdx, Content: chunk.Content, Thinking: chunk.Thinking}
 		case err := <-errCh:
 			if err != nil {
-				return streamErrMsg{Err: err}
+				return streamErrMsg{TabIdx: tabIdx, Err: err}
 			}
-			return streamDoneMsg{}
+			return streamDoneMsg{TabIdx: tabIdx}
 		}
 	}
 }
 
-func (m Model) autoSaveCmd() tea.Cmd {
-	msgs := m.history.Messages()
+func (m Model) autoSaveCmd(tabIdx int) tea.Cmd {
+	msgs := m.tabs[tabIdx].history.Messages()
 	store := m.store
-	name := m.autoSaveName
+	name := m.tabs[tabIdx].autoSaveName
 	return func() tea.Msg {
 		err := store.Save(name, msgs)
-		return autoSavedMsg{Err: err}
+		return autoSavedMsg{TabIdx: tabIdx, Err: err}
 	}
 }
 
@@ -392,13 +417,14 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "/clear":
-		m.history.Clear()
-		m.totalTokens = 0
-		m.pendingImages = nil
-		m.imageCounter = 0
-		m.chatFollowBottom = true
-		m.viewport.SetContent("")
-		m.viewport.GotoBottom()
+		tab := &m.tabs[m.activeTab]
+		tab.history.Clear()
+		tab.totalTokens = 0
+		tab.pendingImages = nil
+		tab.imageCounter = 0
+		tab.chatFollowBottom = true
+		tab.viewport.SetContent("")
+		tab.viewport.GotoBottom()
 		m.statusMsg = "Conversation cleared"
 		return m, nil
 
@@ -411,7 +437,7 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.client.SetModel(parts[1])
+		m.activeTabSession().client.SetModel(parts[1])
 		m.cfg.API.Model = parts[1]
 		m.statusMsg = "Model set to " + parts[1]
 		return m, m.saveConfigCmd()

@@ -16,7 +16,7 @@ func (m Model) updateOnboardMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if msg.String() == "esc" && !m.configEd.editing {
 		m.mode = modeChat
 		m.statusMsg = "Ready! Type a message to start chatting."
-		m.client = chat.NewProvider(m.cfg.API.Provider, m.cfg.API.BaseURL, m.cfg.API.APIKey, m.cfg.API.Model)
+		m.activeTabSession().client = chat.NewProvider(m.cfg.API.Provider, m.cfg.API.BaseURL, m.cfg.API.APIKey, m.cfg.API.Model)
 		return m, m.saveConfigCmd()
 	}
 

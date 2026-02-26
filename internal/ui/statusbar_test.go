@@ -25,11 +25,15 @@ func (s *statusStubProvider) BaseURL() string       { return "" }
 func (s *statusStubProvider) APIKey() string        { return "" }
 
 func TestRenderStatusBarDoesNotWrapToSecondLine(t *testing.T) {
+	tab := TabSession{
+		history: chat.NewHistory(),
+		client:  &statusStubProvider{model: "gemini-3-pro-preview-very-long"},
+	}
 	m := Model{
 		theme:     DarkTheme,
 		width:     40,
-		history:   chat.NewHistory(),
-		client:    &statusStubProvider{model: "gemini-3-pro-preview-very-long"},
+		tabs:      []TabSession{tab},
+		activeTab: 0,
 		statusMsg: "Resumed: 2026-02-24_134124",
 	}
 
