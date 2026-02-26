@@ -47,6 +47,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+w":
 			m.closeTab(m.activeTab)
 			return m, nil
+		case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5",
+			"alt+6", "alt+7", "alt+8", "alt+9":
+			digit := int(msg.String()[4] - '1') // "alt+1" → 0, "alt+9" → 8
+			m.switchTab(digit)
+			return m, nil
+		case "alt+0":
+			m.mode = modeTabOverflow
+			return m, nil
 		}
 
 		if m.mode == modeConfig {
@@ -198,6 +206,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
+		// Tab bar click (row 0)
+		if msg.Y == 0 && msg.Action == tea.MouseActionPress {
+			zone := m.hitTestTabBar(msg.X)
+			if zone != nil {
+				switch zone.action {
+				case tabHitSelect:
+					m.switchTab(zone.tabIdx)
+				case tabHitClose:
+					m.closeTab(zone.tabIdx)
+				case tabHitNew:
+					cmd := m.newTab()
+					return m, cmd
+				case tabHitOverflow:
+					m.mode = modeTabOverflow
+				}
+				return m, nil
+			}
+		}
+		// Viewport scrolling for the chat area
 		if m.mode == modeChat {
 			tab := &m.tabs[m.activeTab]
 			var cmd tea.Cmd
@@ -368,6 +395,20 @@ func (m *Model) closeTab(idx int) {
 	m.tabs[m.activeTab].viewport.SetContent(m.buildChatContent())
 	if m.tabs[m.activeTab].chatFollowBottom {
 		m.tabs[m.activeTab].viewport.GotoBottom()
+	}
+}
+
+func (m *Model) switchTab(idx int) {
+	if idx < 0 || idx >= len(m.tabs) {
+		return
+	}
+	if idx == m.activeTab {
+		return
+	}
+	m.activeTab = idx
+	m.tabs[idx].viewport.SetContent(m.buildChatContent())
+	if m.tabs[idx].chatFollowBottom {
+		m.tabs[idx].viewport.GotoBottom()
 	}
 }
 
