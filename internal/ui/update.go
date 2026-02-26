@@ -366,6 +366,9 @@ func (m *Model) closeTab(idx int) {
 	}
 	// Refresh viewport content for newly active tab
 	m.tabs[m.activeTab].viewport.SetContent(m.buildChatContent())
+	if m.tabs[m.activeTab].chatFollowBottom {
+		m.tabs[m.activeTab].viewport.GotoBottom()
+	}
 }
 
 // looksLikeSGRMouse reports whether s contains an SGR mouse sequence
