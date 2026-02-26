@@ -20,6 +20,11 @@ type Theme struct {
 	StatusKeyBg    string
 	StatusKeyFg    string
 	UserMsgBg      string
+	TabBarBg       string
+	TabActiveBg    string
+	TabActiveFg    string
+	TabInactiveFg  string
+	TabCloseColor  string
 }
 
 var DarkTheme = Theme{
@@ -39,6 +44,11 @@ var DarkTheme = Theme{
 	StatusKeyBg:    "#3D3D3D",
 	StatusKeyFg:    "#A8A8A8",
 	UserMsgBg:      "#2E2E2E",
+	TabBarBg:       "#1E1E1E",
+	TabActiveBg:    "#3D3D3D",
+	TabActiveFg:    "#E0E0E0",
+	TabInactiveFg:  "#808080",
+	TabCloseColor:  "#808080",
 }
 
 var LightTheme = Theme{
@@ -58,6 +68,11 @@ var LightTheme = Theme{
 	StatusKeyBg:    "#D0CCC6",
 	StatusKeyFg:    "#5A5A5A",
 	UserMsgBg:      "#EBEBEB",
+	TabBarBg:       "#D8D5D0",
+	TabActiveBg:    "#F5F3F0",
+	TabActiveFg:    "#2A2A2A",
+	TabInactiveFg:  "#6A6A6A",
+	TabCloseColor:  "#8A8A8A",
 }
 
 func ThemeByName(name string) Theme {
@@ -162,4 +177,30 @@ func (t Theme) UserMsgStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Background(lipgloss.Color(t.UserMsgBg)).
 		Width(width)
+}
+
+func (t Theme) TabBarStyle(width int) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color(t.TabBarBg)).
+		Width(width)
+}
+
+func (t Theme) TabActiveStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color(t.TabActiveBg)).
+		Foreground(lipgloss.Color(t.TabActiveFg)).
+		Bold(true).
+		Padding(0, 1)
+}
+
+func (t Theme) TabInactiveStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color(t.TabBarBg)).
+		Foreground(lipgloss.Color(t.TabInactiveFg)).
+		Padding(0, 1)
+}
+
+func (t Theme) TabCloseStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.TabCloseColor))
 }
