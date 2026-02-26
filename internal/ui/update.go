@@ -39,6 +39,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.mode == modeTabRename {
+			return m.updateTabRenameMode(msg)
+		}
+
 		// Tab management — global shortcuts
 		switch msg.String() {
 		case "ctrl+t":
@@ -55,6 +59,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "alt+0":
 			m.mode = modeTabOverflow
 			return m, nil
+		case "f2":
+			if m.mode == modeChat {
+				m.tabRename = m.tabs[m.activeTab].name
+				m.mode = modeTabRename
+				return m, nil
+			}
 		}
 
 		if m.mode == modeConfig {
@@ -363,6 +373,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+
+func (m Model) updateTabRenameMode(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		name := strings.TrimSpace(m.tabRename)
+		if name == "" {
+			name = m.tabs[m.activeTab].client.Model()
+		}
+		m.tabs[m.activeTab].name = name
+		m.tabRename = ""
+		m.mode = modeChat
+	case "esc":
+		m.tabRename = ""
+		m.mode = modeChat
+	case "backspace":
+		runes := []rune(m.tabRename)
+		if len(runes) > 0 {
+			m.tabRename = string(runes[:len(runes)-1])
+		}
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.tabRename += string(msg.Runes)
+		}
+	}
+	return m, nil
+}
 
 func (m *Model) newTab() tea.Cmd {
 	tab, err := newTabSession(m.cfg, m.tabs[m.activeTab].client, m.width)

@@ -9,6 +9,15 @@ import (
 )
 
 func (m Model) renderStatusBar() string {
+	if m.mode == modeTabRename {
+		prompt := "Rename tab: " + m.tabRename + "█"
+		return lipgloss.NewStyle().
+			Width(m.width).
+			Background(lipgloss.Color(m.theme.StatusBarBg)).
+			Foreground(lipgloss.Color(m.theme.StatusBarFg)).
+			Render(prompt)
+	}
+
 	tab := m.activeTabSession()
 	model := m.theme.StatusKeyStyle().Render("model") + m.theme.StatusBarStyle().Render(tab.client.Model())
 	tokens := m.theme.StatusKeyStyle().Render("tokens") + m.theme.StatusBarStyle().Render(fmt.Sprintf("%d", tab.totalTokens))
