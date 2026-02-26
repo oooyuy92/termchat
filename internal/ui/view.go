@@ -76,8 +76,8 @@ func (m Model) buildChatContent() string {
 	for _, msg := range m.history.Messages() {
 		switch msg.Role {
 		case "user":
-			b.WriteString(m.theme.UserLabelStyle().Render("You:") + "\n")
-			b.WriteString(msg.Content + "\n\n")
+			block := m.theme.UserLabelStyle().Render("You:") + "\n" + msg.Content
+			b.WriteString(m.theme.UserMsgStyle(m.width).Render(block) + "\n\n")
 		case "assistant":
 			b.WriteString(m.theme.AssistantLabelStyle().Render(m.client.Model()+":") + "\n")
 			rendered, err := m.renderer.Render(msg.Content)

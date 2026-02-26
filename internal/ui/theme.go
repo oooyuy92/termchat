@@ -19,6 +19,7 @@ type Theme struct {
 	StatusBarFg    string
 	StatusKeyBg    string
 	StatusKeyFg    string
+	UserMsgBg      string
 }
 
 var DarkTheme = Theme{
@@ -37,6 +38,7 @@ var DarkTheme = Theme{
 	StatusBarFg:    "#9A9A9A",
 	StatusKeyBg:    "#3D3D3D",
 	StatusKeyFg:    "#A8A8A8",
+	UserMsgBg:      "#2E2E2E",
 }
 
 var LightTheme = Theme{
@@ -55,6 +57,7 @@ var LightTheme = Theme{
 	StatusBarFg:    "#6A6A6A",
 	StatusKeyBg:    "#D0CCC6",
 	StatusKeyFg:    "#5A5A5A",
+	UserMsgBg:      "#EBEBEB",
 }
 
 func ThemeByName(name string) Theme {
@@ -150,4 +153,13 @@ func (t Theme) StatusKeyStyle() lipgloss.Style {
 func (t Theme) SpinnerStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ThinkingText))
+}
+
+func (t Theme) UserMsgStyle(width int) lipgloss.Style {
+	if width <= 0 {
+		width = 80
+	}
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color(t.UserMsgBg)).
+		Width(width)
 }
