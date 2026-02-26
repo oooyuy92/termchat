@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type clipboardResultMsg struct{ Err error }
@@ -129,6 +130,7 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewMessageBrowse() string {
+	tabBar := (&m).renderTabBar()
 	tab := m.activeTabSession()
 	msgs := tab.history.Messages()
 	if len(msgs) == 0 {
@@ -136,7 +138,7 @@ func (m Model) viewMessageBrowse() string {
 		b.WriteString(m.theme.ConfigTitleStyle().Render("Browse Messages") + "\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  No messages.") + "\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Esc: back") + "\n")
-		return b.String() + "\n" + m.renderStatusBar()
+		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 	}
 
 	cur := m.browseCursor
@@ -169,8 +171,8 @@ func (m Model) viewMessageBrowse() string {
 	}
 
 	// Clip content to available height to avoid overflow
-	// Available lines = total height - header(2) - blank(1) - divider(1) - help(1) - status(1) - blank(1)
-	availableLines := m.height - 7
+	// Available lines = total height - tabbar(1) - header(2) - blank(1) - divider(1) - help(1) - status(1) - blank(1)
+	availableLines := m.height - 8
 	if availableLines < 1 {
 		availableLines = 1
 	}
@@ -196,5 +198,5 @@ func (m Model) viewMessageBrowse() string {
 		"↑↓: prev/next  Enter: rollback  d: delete  b: branch  c: copy  Esc: back",
 	) + "\n")
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }

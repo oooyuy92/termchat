@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/export"
 	"github.com/termchat/termchat/internal/storage"
@@ -184,6 +185,7 @@ func (m Model) updateExportPick(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewResumePicker() string {
+	tabBar := (&m).renderTabBar()
 	var b strings.Builder
 	p := m.resumePick
 
@@ -195,7 +197,7 @@ func (m Model) viewResumePicker() string {
 		b.WriteString("\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Esc: back to chat"))
 		b.WriteString("\n")
-		return b.String() + "\n" + m.renderStatusBar()
+		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 	}
 
 	// Date navigation row
@@ -248,5 +250,5 @@ func (m Model) viewResumePicker() string {
 		b.WriteString("\n")
 	}
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }

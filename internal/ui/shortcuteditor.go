@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/shortcuts"
 )
 
@@ -164,6 +165,7 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewShortcutsEditor() string {
+	tabBar := (&m).renderTabBar()
 	var b strings.Builder
 	ed := m.shortcutEd
 
@@ -177,7 +179,7 @@ func (m Model) viewShortcutsEditor() string {
 			b.WriteString("\n\n")
 			b.WriteString(m.theme.ConfigHelpStyle().Render("  n: new  |  Esc: back"))
 			b.WriteString("\n")
-			return b.String() + "\n" + m.renderStatusBar()
+			return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 		}
 
 		for i, sc := range ed.items {
@@ -267,5 +269,5 @@ func (m Model) viewShortcutsEditor() string {
 		b.WriteString("\n")
 	}
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }

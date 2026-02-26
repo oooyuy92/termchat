@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/chat"
 )
 
@@ -42,6 +43,7 @@ func (m Model) updateOnboardMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 // viewOnboard renders the first-run onboarding wizard.
 func (m Model) viewOnboard() string {
+	tabBar := (&m).renderTabBar()
 	var b strings.Builder
 	ed := m.configEd
 
@@ -98,5 +100,5 @@ func (m Model) viewOnboard() string {
 	}
 	b.WriteString("\n")
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }

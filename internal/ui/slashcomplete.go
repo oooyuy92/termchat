@@ -165,6 +165,7 @@ func (m Model) updateSlashComplete(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) viewSlashComplete() string {
+	tabBar := (&m).renderTabBar()
 	statusBar := m.renderStatusBar()
 	inputArea := m.tabs[m.activeTab].textarea.View()
 
@@ -189,7 +190,10 @@ func (m Model) viewSlashComplete() string {
 	dropdown := strings.Join(dropdownLines, "\n")
 
 	// Dynamic viewport height — same calculation as View()
-	vpHeight := m.height - lipgloss.Height(statusBar) - lipgloss.Height(inputArea)
+	vpHeight := m.height -
+		lipgloss.Height(tabBar) -
+		lipgloss.Height(statusBar) -
+		lipgloss.Height(inputArea)
 	if dropdown != "" {
 		vpHeight -= lipgloss.Height(dropdown)
 	}
@@ -204,7 +208,7 @@ func (m Model) viewSlashComplete() string {
 		}
 	}
 
-	parts := []string{tab.viewport.View()}
+	parts := []string{tabBar, tab.viewport.View()}
 	if dropdown != "" {
 		parts = append(parts, dropdown)
 	}

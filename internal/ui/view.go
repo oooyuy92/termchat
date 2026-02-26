@@ -148,6 +148,7 @@ func (m Model) View() string {
 		return m.viewMessageBrowse()
 	}
 
+	tabBar := (&m).renderTabBar()
 	statusBar := m.renderStatusBar()
 	tab2 := m.activeTabSession()
 	inputArea := tab2.textarea.View()
@@ -159,7 +160,10 @@ func (m Model) View() string {
 	}
 
 	// Dynamic viewport height
-	vpHeight := m.height - lipgloss.Height(statusBar) - lipgloss.Height(inputArea)
+	vpHeight := m.height -
+		lipgloss.Height(tabBar) -
+		lipgloss.Height(statusBar) -
+		lipgloss.Height(inputArea)
 	if spinnerLine != "" {
 		vpHeight -= lipgloss.Height(spinnerLine)
 	}
@@ -173,7 +177,7 @@ func (m Model) View() string {
 		}
 	}
 
-	parts := []string{tab2.viewport.View()}
+	parts := []string{tabBar, tab2.viewport.View()}
 	if spinnerLine != "" {
 		parts = append(parts, spinnerLine)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 )
@@ -263,6 +264,7 @@ func (m Model) saveConfigCmd() tea.Cmd {
 }
 
 func (m Model) viewConfigEditor() string {
+	tabBar := (&m).renderTabBar()
 	var b strings.Builder
 	ed := m.configEd
 
@@ -317,5 +319,5 @@ func (m Model) viewConfigEditor() string {
 	}
 	b.WriteString("\n")
 
-	return b.String() + "\n" + m.renderStatusBar()
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 }
