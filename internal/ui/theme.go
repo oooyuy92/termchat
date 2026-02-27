@@ -20,6 +20,7 @@ type Theme struct {
 	StatusKeyBg    string
 	StatusKeyFg    string
 	UserMsgBg      string
+	UserMsgFg      string
 	TabBarBg       string
 	TabActiveBg    string
 	TabActiveFg    string
@@ -43,7 +44,8 @@ var DarkTheme = Theme{
 	StatusBarFg:    "#9A9A9A",
 	StatusKeyBg:    "#3D3D3D",
 	StatusKeyFg:    "#A8A8A8",
-	UserMsgBg:      "#2E2E2E",
+	UserMsgBg:      "#3A3A3A",
+	UserMsgFg:      "#F0F0F0",
 	TabBarBg:       "#1E1E1E",
 	TabActiveBg:    "#3D3D3D",
 	TabActiveFg:    "#E0E0E0",
@@ -67,7 +69,8 @@ var LightTheme = Theme{
 	StatusBarFg:    "#6A6A6A",
 	StatusKeyBg:    "#D0CCC6",
 	StatusKeyFg:    "#5A5A5A",
-	UserMsgBg:      "#EBEBEB",
+	UserMsgBg:      "#E0E0E0",
+	UserMsgFg:      "#1A1A1A",
 	TabBarBg:       "#D8D5D0",
 	TabActiveBg:    "#F5F3F0",
 	TabActiveFg:    "#2A2A2A",
@@ -170,13 +173,11 @@ func (t Theme) SpinnerStyle() lipgloss.Style {
 		Foreground(lipgloss.Color(t.ThinkingText))
 }
 
-func (t Theme) UserMsgStyle(width int) lipgloss.Style {
-	if width <= 0 {
-		width = 80
-	}
+func (t Theme) UserMsgStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Background(lipgloss.Color(t.UserMsgBg)).
-		Width(width)
+		Foreground(lipgloss.Color(t.UserMsgFg)).
+		Padding(0, 1)
 }
 
 func (t Theme) TabBarStyle(width int) lipgloss.Style {

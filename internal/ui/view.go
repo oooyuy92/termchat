@@ -78,8 +78,14 @@ func (m Model) buildChatContent() string {
 	for _, msg := range tab.history.Messages() {
 		switch msg.Role {
 		case "user":
-			block := m.theme.UserLabelStyle().Render("You:") + "\n" + msg.Content
-			b.WriteString(m.theme.UserMsgStyle(m.width).Render(block) + "\n\n")
+			maxBubbleWidth := m.width * 2 / 3
+			if maxBubbleWidth < 20 {
+				maxBubbleWidth = 20
+			}
+			wrapped := wrap.String(msg.Content, maxBubbleWidth-2)
+			block := m.theme.UserLabelStyle().Render("You:") + "\n" + wrapped
+			bubble := m.theme.UserMsgStyle().Render(block)
+			b.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Right, bubble) + "\n\n")
 		case "assistant":
 			b.WriteString(m.theme.AssistantLabelStyle().Render(tab.client.Model()+":") + "\n")
 			rendered, err := tab.renderer.Render(msg.Content)
