@@ -24,6 +24,7 @@ func (s *stubProvider) SetBaseURL(string)     {}
 func (s *stubProvider) SetAPIKey(string)      {}
 func (s *stubProvider) BaseURL() string       { return "" }
 func (s *stubProvider) APIKey() string        { return "" }
+func (s *stubProvider) SupportsVision() bool  { return false }
 
 func TestBuildChatContentQuoteWrapKeepsPrefix(t *testing.T) {
 	renderer, err := buildRenderer("dark", 24)

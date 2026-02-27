@@ -23,6 +23,7 @@ func (s *statusStubProvider) SetBaseURL(string)     {}
 func (s *statusStubProvider) SetAPIKey(string)      {}
 func (s *statusStubProvider) BaseURL() string       { return "" }
 func (s *statusStubProvider) APIKey() string        { return "" }
+func (s *statusStubProvider) SupportsVision() bool  { return false }
 
 func TestRenderStatusBarDoesNotWrapToSecondLine(t *testing.T) {
 	tab := TabSession{
