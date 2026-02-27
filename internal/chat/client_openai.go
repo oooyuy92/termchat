@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -53,13 +54,60 @@ func (c *OpenAIClient) SetAPIKey(key string) {
 	c.apiKey = key
 }
 
-func (c *OpenAIClient) APIKey() string {
-	return c.apiKey
+func (c *OpenAIClient) APIKey() string { return c.apiKey }
+
+func (c *OpenAIClient) SupportsVision() bool {
+	m := c.model
+	return strings.Contains(m, "gpt-4o") ||
+		strings.Contains(m, "gpt-4-turbo") ||
+		strings.Contains(m, "gpt-4-vision") ||
+		strings.Contains(m, "o1") ||
+		strings.Contains(m, "o3") ||
+		strings.Contains(m, "o4")
+}
+
+type openAIImageURL struct {
+	URL string `json:"url"`
+}
+
+type openAIContentPart struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	ImageURL *openAIImageURL `json:"image_url,omitempty"`
+}
+
+type openAIMessage struct {
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"` // string or []openAIContentPart
+}
+
+func toOpenAIMessages(messages []Message) []openAIMessage {
+	out := make([]openAIMessage, 0, len(messages))
+	for _, m := range messages {
+		if len(m.Images) == 0 {
+			out = append(out, openAIMessage{Role: m.Role, Content: m.Content})
+			continue
+		}
+		parts := make([]openAIContentPart, 0, len(m.Images)+1)
+		for _, img := range m.Images {
+			encoded := base64.StdEncoding.EncodeToString(img.Data)
+			url := "data:" + img.MimeType + ";base64," + encoded
+			parts = append(parts, openAIContentPart{
+				Type:     "image_url",
+				ImageURL: &openAIImageURL{URL: url},
+			})
+		}
+		if m.Content != "" {
+			parts = append(parts, openAIContentPart{Type: "text", Text: m.Content})
+		}
+		out = append(out, openAIMessage{Role: m.Role, Content: parts})
+	}
+	return out
 }
 
 type chatRequest struct {
-	Model           string    `json:"model"`
-	Messages        []Message `json:"messages"`
+	Model           string          `json:"model"`
+	Messages        []openAIMessage `json:"messages"`
 	Stream          bool      `json:"stream"`
 	Temperature     float64   `json:"temperature,omitempty"`
 	MaxTokens       int       `json:"max_tokens,omitempty"`
@@ -86,7 +134,7 @@ type chatChunk struct {
 func (c *OpenAIClient) SendStream(ctx context.Context, messages []Message, temperature float64, maxTokens int, reasoningEffort string, onChunk func(content, thinking string)) error {
 	reqBody := chatRequest{
 		Model:           c.model,
-		Messages:        messages,
+		Messages:        toOpenAIMessages(messages),
 		Stream:          true,
 		Temperature:     temperature,
 		MaxTokens:       maxTokens,

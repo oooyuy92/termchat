@@ -49,10 +49,11 @@ func (c *GeminiClient) initClient() {
 	c.client = client
 }
 
-func (c *GeminiClient) Model() string     { return c.model }
-func (c *GeminiClient) SetModel(m string) { c.model = canonicalGeminiModel(m) }
-func (c *GeminiClient) BaseURL() string   { return "https://generativelanguage.googleapis.com" }
-func (c *GeminiClient) APIKey() string    { return c.apiKey }
+func (c *GeminiClient) Model() string        { return c.model }
+func (c *GeminiClient) SetModel(m string)    { c.model = canonicalGeminiModel(m) }
+func (c *GeminiClient) BaseURL() string      { return "https://generativelanguage.googleapis.com" }
+func (c *GeminiClient) APIKey() string       { return c.apiKey }
+func (c *GeminiClient) SupportsVision() bool { return true }
 
 func (c *GeminiClient) SetBaseURL(_ string) {
 	// The official SDK manages the endpoint internally.

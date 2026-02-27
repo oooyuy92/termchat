@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,16 +33,50 @@ func NewAnthropicClient(baseURL, apiKey, model string) *AnthropicClient {
 	}
 }
 
-func (c *AnthropicClient) Model() string       { return c.model }
-func (c *AnthropicClient) SetModel(m string)   { c.model = m }
-func (c *AnthropicClient) SetBaseURL(u string) { c.baseURL = u }
-func (c *AnthropicClient) SetAPIKey(k string)  { c.apiKey = k }
-func (c *AnthropicClient) BaseURL() string     { return c.baseURL }
-func (c *AnthropicClient) APIKey() string      { return c.apiKey }
+func (c *AnthropicClient) Model() string        { return c.model }
+func (c *AnthropicClient) SetModel(m string)    { c.model = m }
+func (c *AnthropicClient) SetBaseURL(u string)  { c.baseURL = u }
+func (c *AnthropicClient) SetAPIKey(k string)   { c.apiKey = k }
+func (c *AnthropicClient) BaseURL() string      { return c.baseURL }
+func (c *AnthropicClient) APIKey() string       { return c.apiKey }
+func (c *AnthropicClient) SupportsVision() bool { return true }
+
+type anthropicContentBlock struct {
+	Type   string                   `json:"type"`
+	Text   string                   `json:"text,omitempty"`
+	Source *anthropicImageSource    `json:"source,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
 
 type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+}
+
+func buildAnthropicContent(m Message) interface{} {
+	if len(m.Images) == 0 {
+		return m.Content
+	}
+	var blocks []anthropicContentBlock
+	for _, img := range m.Images {
+		blocks = append(blocks, anthropicContentBlock{
+			Type: "image",
+			Source: &anthropicImageSource{
+				Type:      "base64",
+				MediaType: img.MimeType,
+				Data:      base64.StdEncoding.EncodeToString(img.Data),
+			},
+		})
+	}
+	if m.Content != "" {
+		blocks = append(blocks, anthropicContentBlock{Type: "text", Text: m.Content})
+	}
+	return blocks
 }
 
 type anthropicRequest struct {
@@ -81,7 +116,7 @@ func (c *AnthropicClient) stream(ctx context.Context, messages []Message, temp f
 		if m.Role == "system" {
 			system = m.Content
 		} else {
-			apiMsgs = append(apiMsgs, anthropicMessage{Role: m.Role, Content: m.Content})
+			apiMsgs = append(apiMsgs, anthropicMessage{Role: m.Role, Content: buildAnthropicContent(m)})
 		}
 	}
 

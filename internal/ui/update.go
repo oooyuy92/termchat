@@ -175,6 +175,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.handleCommand(input)
 			}
 
+			if len(tab.pendingImages) > 0 && !tab.client.SupportsVision() {
+				tab.pendingImages = nil
+				tab.imageCounter = 0
+				m.statusMsg = "⚠ 当前模型不支持图片，已忽略"
+			}
 			tab.history.Add(chat.Message{Role: "user", Content: input, Images: tab.pendingImages})
 			tab.pendingImages = nil
 			tab.streaming = true

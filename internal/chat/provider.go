@@ -17,6 +17,7 @@ type Provider interface {
 	SetAPIKey(string)
 	BaseURL() string
 	APIKey() string
+	SupportsVision() bool
 }
 
 // newHTTPClient returns an http.Client matching http.DefaultTransport
