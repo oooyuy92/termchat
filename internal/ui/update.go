@@ -578,7 +578,14 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Failed to load conversations: " + err.Error()
 			return m, nil
 		}
-		m.resumePick = buildResumePicker(convs)
+		allItems, err := m.store.LoadAllForSearch()
+		if err != nil {
+			m.statusMsg = "Failed to load search index: " + err.Error()
+			return m, nil
+		}
+		pick := buildResumePicker(convs)
+		pick.allItems = allItems
+		m.resumePick = pick
 		m.mode = modeResume
 		return m, nil
 

@@ -19,10 +19,15 @@ type dateGroup struct {
 
 type resumePicker struct {
 	groups    []dateGroup
-	dateIdx   int  // index into groups (left/right navigation)
-	convIdx   int  // index within groups[dateIdx].convs (up/down navigation)
-	exporting bool // true when format selector is active
-	exportFmt int  // 0=txt, 1=md, 2=pdf
+	dateIdx   int
+	convIdx   int
+	exporting bool
+	exportFmt int
+	// Search state
+	query         string
+	allItems      []storage.ConvSearchItem
+	searchResults []storage.ConvInfo
+	searchCursor  int
 }
 
 // buildResumePicker groups ConvInfo by date (preserving most-recent-first order)
@@ -45,6 +50,20 @@ func buildResumePicker(convs []storage.ConvInfo) resumePicker {
 	return resumePicker{groups: groups}
 }
 
+// applySearch filters allItems by the current query and updates searchResults.
+func (p *resumePicker) applySearch() {
+	p.searchResults = nil
+	for _, item := range p.allItems {
+		if fuzzyMatch(p.query, item.FullText) {
+			p.searchResults = append(p.searchResults, storage.ConvInfo{
+				Name: item.Name,
+				Date: item.Date,
+			})
+		}
+	}
+	p.searchCursor = 0
+}
+
 // truncate shortens s to at most n runes, appending "…" if truncated.
 func truncate(s string, n int) string {
 	if utf8.RuneCountInString(s) <= n {
@@ -61,48 +80,100 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.confirmQuit = false
 	}
 
-	// If export picker is active, handle its keys first
 	if p.exporting {
 		return m.updateExportPick(msg)
 	}
 
 	switch msg.String() {
-	case "left", "h":
-		if p.dateIdx > 0 {
-			p.dateIdx--
-			p.convIdx = 0
-		}
-	case "right", "l":
-		if p.dateIdx < len(p.groups)-1 {
-			p.dateIdx++
-			p.convIdx = 0
-		}
-	case "up", "k":
-		if p.convIdx > 0 {
-			p.convIdx--
-		}
-	case "down", "j":
-		if len(p.groups) > 0 && p.convIdx < len(p.groups[p.dateIdx].convs)-1 {
-			p.convIdx++
-		}
-	case "e":
-		if len(p.groups) > 0 {
-			p.exporting = true
-		}
-	case "enter":
-		if len(p.groups) == 0 {
-			m.mode = modeChat
-			m.statusMsg = "No conversations"
+	case "esc":
+		if p.query != "" {
+			p.query = ""
+			p.searchResults = nil
+			p.searchCursor = 0
 			return m, nil
 		}
-		conv := p.groups[p.dateIdx].convs[p.convIdx]
-		msgs, err := m.store.Load(conv.Name)
+		m.mode = modeChat
+		m.statusMsg = "Cancelled"
+		return m, nil
+
+	case "backspace":
+		if p.query != "" {
+			runes := []rune(p.query)
+			p.query = string(runes[:len(runes)-1])
+			p.applySearch()
+			return m, nil
+		}
+
+	case "up", "k":
+		if p.query != "" {
+			if p.searchCursor > 0 {
+				p.searchCursor--
+			}
+		} else {
+			if p.convIdx > 0 {
+				p.convIdx--
+			}
+		}
+		return m, nil
+
+	case "down", "j":
+		if p.query != "" {
+			if p.searchCursor < len(p.searchResults)-1 {
+				p.searchCursor++
+			}
+		} else {
+			if len(p.groups) > 0 && p.convIdx < len(p.groups[p.dateIdx].convs)-1 {
+				p.convIdx++
+			}
+		}
+		return m, nil
+
+	case "left", "h":
+		if p.query == "" {
+			if p.dateIdx > 0 {
+				p.dateIdx--
+				p.convIdx = 0
+			}
+		}
+		return m, nil
+
+	case "right", "l":
+		if p.query == "" {
+			if p.dateIdx < len(p.groups)-1 {
+				p.dateIdx++
+				p.convIdx = 0
+			}
+		}
+		return m, nil
+
+	case "e":
+		if p.query == "" && len(p.groups) > 0 {
+			p.exporting = true
+		}
+		return m, nil
+
+	case "enter":
+		var convName string
+		if p.query != "" {
+			if len(p.searchResults) == 0 || p.searchCursor >= len(p.searchResults) {
+				return m, nil
+			}
+			convName = p.searchResults[p.searchCursor].Name
+		} else {
+			if len(p.groups) == 0 {
+				m.mode = modeChat
+				m.statusMsg = "No conversations"
+				return m, nil
+			}
+			convName = p.groups[p.dateIdx].convs[p.convIdx].Name
+		}
+		msgs, err := m.store.Load(convName)
 		if err != nil {
 			m.statusMsg = "Load failed: " + err.Error()
 			m.mode = modeChat
 			return m, nil
 		}
-		m.activeTabSession().autoSaveName = conv.Name
+		m.activeTabSession().autoSaveName = convName
 		m.activeTabSession().history.Clear()
 		m.activeTabSession().history.SetSystemPrompt("")
 		m.activeRole = ""
@@ -112,18 +183,27 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.activeTabSession().viewport.SetContent(m.buildChatContent())
 		m.activeTabSession().viewport.GotoBottom()
 		m.activeTabSession().chatFollowBottom = true
+		p.query = ""
+		p.searchResults = nil
 		m.mode = modeChat
-		m.statusMsg = "Resumed: " + conv.Name
-	case "esc":
-		m.mode = modeChat
-		m.statusMsg = "Cancelled"
+		m.statusMsg = "Resumed: " + convName
+		return m, nil
+
 	case "ctrl+c":
 		if m.confirmQuit {
 			return m, tea.Quit
 		}
 		m.confirmQuit = true
 		m.statusMsg = "Press Ctrl+C again to quit"
+		return m, nil
 	}
+
+	// Printable rune input → append to query
+	if msg.Type == tea.KeyRunes {
+		p.query += string(msg.Runes)
+		p.applySearch()
+	}
+
 	return m, nil
 }
 
