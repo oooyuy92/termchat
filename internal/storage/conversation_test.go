@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/termchat/termchat/internal/chat"
@@ -108,6 +109,43 @@ func TestListEmpty(t *testing.T) {
 	}
 	if len(names) != 0 {
 		t.Errorf("List() = %v, want empty", names)
+	}
+}
+
+func TestLoadAllForSearch(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	_ = s.Save("conv-a", []chat.Message{
+		{Role: "user", Content: "hello world"},
+		{Role: "assistant", Content: "hi there"},
+	})
+	_ = s.Save("conv-b", []chat.Message{
+		{Role: "user", Content: "深度求索"},
+	})
+
+	items, err := s.LoadAllForSearch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("want 2 items, got %d", len(items))
+	}
+	if items[0].Name != "conv-b" {
+		t.Errorf("want conv-b first, got %s", items[0].Name)
+	}
+	if !strings.Contains(items[1].FullText, "hello world") {
+		t.Errorf("FullText missing 'hello world': %s", items[1].FullText)
+	}
+	if !strings.Contains(items[1].FullText, "hi there") {
+		t.Errorf("FullText missing 'hi there': %s", items[1].FullText)
+	}
+	if !strings.Contains(items[0].FullText, "深度求索") {
+		t.Errorf("FullText missing Chinese content: %s", items[0].FullText)
 	}
 }
 

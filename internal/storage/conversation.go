@@ -21,6 +21,14 @@ type ConvInfo struct {
 	Summary string // first user message content (empty if none)
 }
 
+// ConvSearchItem holds a conversation's name, date, and all message content
+// concatenated for full-text fuzzy search.
+type ConvSearchItem struct {
+	Name     string
+	Date     string
+	FullText string // name + " " + all message content joined by " "
+}
+
 type Store struct {
 	db *sql.DB
 }
@@ -198,6 +206,35 @@ func (s *Store) ListWithDate() ([]ConvInfo, error) {
 		convs = append(convs, c)
 	}
 	return convs, rows.Err()
+}
+
+// LoadAllForSearch returns all conversations with their full message content
+// concatenated into FullText, ordered by most recently updated.
+func (s *Store) LoadAllForSearch() ([]ConvSearchItem, error) {
+	rows, err := s.db.Query(
+		`SELECT c.name, date(c.updated_at),
+			COALESCE(GROUP_CONCAT(m.content, ' '), '')
+		 FROM conversations c
+		 LEFT JOIN messages m ON m.conversation_id = c.id
+		 GROUP BY c.id
+		 ORDER BY c.updated_at DESC, c.id DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []ConvSearchItem
+	for rows.Next() {
+		var item ConvSearchItem
+		var msgContent string
+		if err := rows.Scan(&item.Name, &item.Date, &msgContent); err != nil {
+			return nil, err
+		}
+		item.FullText = item.Name + " " + msgContent
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 // Close releases the database connection.
