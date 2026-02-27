@@ -30,13 +30,17 @@ func (m Model) updateRolePickerMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		role := p.items[p.cursor]
-		m.activeTabSession().history.SetSystemPrompt(role.Prompt)
+		tab := m.activeTabSession()
+		tab.history.SetSystemPrompt(role.Prompt)
+		tab.autoSaveName = "[" + role.Name + "] " + tab.autoSaveName
 		m.activeRole = role.Name
 		m.mode = modeChat
 		return m, nil
 	case "esc":
-		// Use blank system prompt (no role selected)
-		m.activeTabSession().history.SetSystemPrompt("")
+		// Use blank system prompt, default to 通用助手
+		tab := m.activeTabSession()
+		tab.history.SetSystemPrompt("")
+		tab.autoSaveName = "[通用助手] " + tab.autoSaveName
 		m.activeRole = ""
 		m.mode = modeChat
 		return m, nil
