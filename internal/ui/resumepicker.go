@@ -272,6 +272,40 @@ func (m Model) viewResumePicker() string {
 	b.WriteString(m.theme.ConfigTitleStyle().Render("Conversation History"))
 	b.WriteString("\n\n")
 
+	// Search input line (always shown)
+	searchPrompt := m.theme.ConfigHelpStyle().Render("Search: ")
+	var searchVal string
+	if p.query == "" {
+		searchVal = m.theme.ConfigHelpStyle().Render("(type to search)")
+	} else {
+		searchVal = m.theme.ConfigValueStyle().Render(p.query) + "█"
+	}
+	b.WriteString("  " + searchPrompt + searchVal)
+	b.WriteString("\n\n")
+
+	if p.query != "" {
+		// Search results view (flat list)
+		if len(p.searchResults) == 0 {
+			b.WriteString(m.theme.ConfigHelpStyle().Render("  No matches."))
+			b.WriteString("\n")
+		} else {
+			for i, conv := range p.searchResults {
+				cursor := "  "
+				if i == p.searchCursor {
+					cursor = m.theme.ConfigCursorStyle().Render("> ")
+				}
+				name := m.theme.ConfigValueStyle().Render(conv.Name)
+				date := m.theme.ConfigHelpStyle().Render("  " + conv.Date)
+				b.WriteString(cursor + name + date + "\n")
+			}
+		}
+		b.WriteString("\n")
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: select  |  Enter: resume  |  Esc: clear search"))
+		b.WriteString("\n")
+		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
+	}
+
+	// Normal date-grouped view (unchanged)
 	if len(p.groups) == 0 {
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  No saved conversations."))
 		b.WriteString("\n\n")
@@ -280,7 +314,6 @@ func (m Model) viewResumePicker() string {
 		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 	}
 
-	// Date navigation row
 	prev := "  "
 	if p.dateIdx > 0 {
 		prev = "◀ "
@@ -293,7 +326,6 @@ func (m Model) viewResumePicker() string {
 	b.WriteString("  " + prev + m.theme.ConfigTitleStyle().Render(dateStr) + next)
 	b.WriteString("\n\n")
 
-	// Conversation list for current date group
 	group := p.groups[p.dateIdx]
 	for i, conv := range group.convs {
 		cursor := "  "
