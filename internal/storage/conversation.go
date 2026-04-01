@@ -168,6 +168,7 @@ func (s *Store) ListWithDate() ([]ConvInfo, error) {
 		`SELECT c.name, date(c.updated_at),
 			COALESCE((SELECT m.content FROM messages m
 				WHERE m.conversation_id = c.id AND m.role = 'user'
+				AND (m.role = 'user' OR m.is_active_version = 1)
 				ORDER BY m.seq ASC LIMIT 1), '')
 		FROM conversations c ORDER BY c.updated_at DESC, c.id DESC`,
 	)
@@ -195,6 +196,7 @@ func (s *Store) LoadAllForSearch() ([]ConvSearchItem, error) {
 			COALESCE(GROUP_CONCAT(m.content, ' '), '')
 		 FROM conversations c
 		 LEFT JOIN messages m ON m.conversation_id = c.id
+		 WHERE m.id IS NULL OR m.role = 'user' OR m.is_active_version = 1
 		 GROUP BY c.id
 		 ORDER BY c.updated_at DESC, c.id DESC`,
 	)
