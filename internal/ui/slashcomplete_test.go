@@ -35,3 +35,13 @@ func TestFilterSlashCmds_noMatch(t *testing.T) {
 		t.Errorf("filterSlashCmds(\"/zzz\") = %d results, want 0", len(got))
 	}
 }
+
+func TestFilterSlashCmdsIncludesModel(t *testing.T) {
+	got := filterSlashCmds("/mo")
+	if len(got) == 0 {
+		t.Fatalf("filterSlashCmds(/mo) returned no results")
+	}
+	if got[0].Name != "/model" {
+		t.Fatalf("got[0].Name = %q, want /model", got[0].Name)
+	}
+}

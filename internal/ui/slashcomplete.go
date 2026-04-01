@@ -25,6 +25,7 @@ var slashCmds = []slashCmd{
 	{"/clear", "Clear conversation"},
 	{"/exit", "Quit termchat"},
 	{"/history", "Conversation history"},
+	{"/model", "Manage and switch models"},
 	{"/roles", "Edit role presets"},
 	{"/settings", "Model & parameters"},
 	{"/shortcuts", "Edit keyboard shortcuts"},

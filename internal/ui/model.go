@@ -29,6 +29,7 @@ const (
 	modeRoles
 	modeOnboard
 	modeSlashComplete
+	modeModelSelector
 	modeMessageBrowse
 	modeTabRename   // F2 rename active tab
 	modeTabOverflow // … overflow dropdown
@@ -147,6 +148,22 @@ type rolePicker struct {
 	cursor int
 }
 
+type modelSelectorPurpose int
+
+const (
+	modelSelectorManage modelSelectorPurpose = iota
+	modelSelectorPickForSwitch
+	modelSelectorPickForNewVersion
+)
+
+type modelSelectorState struct {
+	purpose         modelSelectorPurpose
+	providers       []config.ProviderEntry
+	providerCursor  int
+	modelCursor     int
+	selectingModels bool
+}
+
 type streamControl struct {
 	cancel context.CancelFunc
 }
@@ -164,6 +181,7 @@ const (
 	confirmNone browseConfirmKind = iota
 	confirmApplyPreview
 	confirmEditRegenerate
+	confirmDeleteSelection
 )
 
 type browseConfirmState struct {
@@ -171,11 +189,19 @@ type browseConfirmState struct {
 	cursor int
 }
 
+const (
+	deleteUserOnly = iota
+	deleteAssistantOnly
+	deleteBothSides
+	deleteCancel
+)
+
 type browseTurn struct {
 	User              chat.Message
 	AssistantVersions []chat.Message
 	ActiveVersion     int
 	PreviewVersion    int
+	TurnSeq           int
 }
 
 func (t browseTurn) VersionCount() int {
@@ -194,41 +220,47 @@ type messageBrowseState struct {
 	editMode           bool
 	editBuffer         string
 	editDirty          bool
+	lastDeletedBatchID int64
+	lastDeletedTurnSeq int
 }
 
 type Model struct {
-	cfg      config.Config
-	store    *storage.Store
+	cfg   config.Config
+	store *storage.Store
 
 	// Theme
 	theme Theme
 
 	// Tab management
-	tabs             []TabSession
-	activeTab        int
-	tabRename        string      // input buffer when in modeTabRename
-	tabBarZones      []tabHitZone
+	tabs              []TabSession
+	activeTab         int
+	tabRename         string // input buffer when in modeTabRename
+	tabBarZones       []tabHitZone
 	tabOverflowOffset int
 
 	// UI state
-	mode             uiMode
-	configEd         configEditor
-	resumePick       resumePicker
-	shortcutsPath    string
-	shortcutEd       shortcutEditor
-	rolesPath        string
-	roleEd           roleEditor
-	rolePick         rolePicker
-	activeRole       string // name of the selected role; shown in status bar
-	cfgPath          string
-	slashAC          slashComplete
-	escCount         int // consecutive Esc presses in chat mode for double-Esc detection
-	messageBrowse    messageBrowseState
-	browseCursor     int // index of selected message in modeMessageBrowse
-	confirmQuit      bool
-	statusMsg        string
-	width            int
-	height           int
+	mode          uiMode
+	configEd      configEditor
+	resumePick    resumePicker
+	shortcutsPath string
+	shortcutEd    shortcutEditor
+	rolesPath     string
+	roleEd        roleEditor
+	rolePick      rolePicker
+	modelRegistryPath string
+	modelRegistry     config.ModelRegistry
+	modelSel          modelSelectorState
+	providerFactory   func(providerType, baseURL, apiKey, model string) chat.Provider
+	activeRole    string // name of the selected role; shown in status bar
+	cfgPath       string
+	slashAC       slashComplete
+	escCount      int // consecutive Esc presses in chat mode for double-Esc detection
+	messageBrowse messageBrowseState
+	browseCursor  int // index of selected message in modeMessageBrowse
+	confirmQuit   bool
+	statusMsg     string
+	width         int
+	height        int
 }
 
 func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
@@ -275,6 +307,12 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Pr
 
 	shortcutsPath := filepath.Join(filepath.Dir(cfgPath), "shortcuts.yaml")
 	rolesPath := filepath.Join(filepath.Dir(cfgPath), "roles.yaml")
+	modelRegistryPath := config.ModelRegistryPath(cfgPath)
+
+	modelRegistry, _, err := config.LoadModelRegistryOrDefault(modelRegistryPath)
+	if err != nil {
+		return Model{}, fmt.Errorf("load model registry: %w", err)
+	}
 
 	rolesList, err := roles.Load(rolesPath)
 	if err != nil {
@@ -306,6 +344,11 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Pr
 		mode:          initialMode,
 		rolesPath:     rolesPath,
 		rolePick:      rolePick,
+		modelRegistryPath: modelRegistryPath,
+		modelRegistry:     modelRegistry,
+		providerFactory: func(providerType, baseURL, apiKey, model string) chat.Provider {
+			return chat.NewProvider(providerType, baseURL, apiKey, model)
+		},
 		configEd:      initConfigEd,
 		tabs:          []TabSession{tab},
 		activeTab:     0,
@@ -318,6 +361,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Close() {
 	if m.store != nil {
+		_ = m.store.PurgeDeleted()
 		m.store.Close()
 	}
 }
@@ -348,4 +392,11 @@ func markdownWrapWidth(termWidth int) int {
 		return termWidth - safetyMargin
 	}
 	return termWidth
+}
+
+func newModelSelectorState(reg config.ModelRegistry, purpose modelSelectorPurpose) modelSelectorState {
+	return modelSelectorState{
+		purpose:   purpose,
+		providers: reg.Providers,
+	}
 }

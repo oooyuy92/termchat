@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/roles"
 	"github.com/termchat/termchat/internal/shortcuts"
@@ -279,10 +279,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeMessageBrowse && msg.Action == tea.MouseActionPress {
 			if m.messageBrowse.mode == browseModeCompare {
 				if msg.Button == tea.MouseButtonWheelDown {
-					m.moveCompareCard(1)
+					m.focusCompareCardAt(msg.X)
+					m.scrollCompareCard(1)
 					return m, nil
 				} else if msg.Button == tea.MouseButtonWheelUp {
-					m.moveCompareCard(-1)
+					m.focusCompareCardAt(msg.X)
+					m.scrollCompareCard(-1)
 					return m, nil
 				}
 			}
@@ -365,7 +367,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.TabIdx < len(m.tabs) {
 			t := &m.tabs[msg.TabIdx]
 			t.streaming = false
-			t.err = msg.Err
+			errorText := "Error: " + msg.Err.Error()
+			assistantMsg := chat.Message{
+				Seq:           nextSeq(t.history.Messages()),
+				Role:          "assistant",
+				Content:       errorText,
+				VersionNumber: 1,
+			}
+			msgs := t.history.Messages()
+			if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
+				assistantMsg.Seq = msgs[len(msgs)-1].Seq
+			}
+			if assistantID, err := m.store.AppendMessage(t.autoSaveName, assistantMsg); err == nil {
+				assistantMsg.ID = assistantID
+			} else {
+				m.statusMsg = "Save failed: " + err.Error()
+			}
+			t.history.Add(assistantMsg)
+			t.err = nil
 			t.currentResp = ""
 			t.currentThinking = ""
 			if msg.TabIdx == m.activeTab {
@@ -446,7 +465,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	return m, nil
 }
-
 
 func (m Model) updateTabRenameMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
@@ -671,6 +689,11 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		pick.allItems = allItems
 		m.resumePick = pick
 		m.mode = modeResume
+		return m, nil
+
+	case "/model":
+		m.modelSel = newModelSelectorState(m.modelRegistry, modelSelectorManage)
+		m.mode = modeModelSelector
 		return m, nil
 
 	case "/shortcuts":
