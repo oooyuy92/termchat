@@ -143,3 +143,64 @@ func TestMessageBrowse_VEntersCompareMode(t *testing.T) {
 		t.Fatalf("mode = %v, want browseModeCompare", m.messageBrowse.mode)
 	}
 }
+
+func newEditableBrowseModel(t *testing.T) Model {
+	t.Helper()
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	// Seed conversation with messages
+	name := "conv"
+	userID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	assistantID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	_ = store.InitVersionGroup(assistantID)
+	_, _ = store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2})
+	user2ID, _ := store.AppendMessage(name, chat.Message{Seq: 2, Role: "user", Content: "q2"})
+	assistant2ID, _ := store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1})
+
+	m.tabs[0].autoSaveName = name
+
+	// Build browse turns
+	m.messageBrowse.turns = []browseTurn{
+		{
+			User: chat.Message{ID: userID, Seq: 1, Role: "user", Content: "q1"},
+			AssistantVersions: []chat.Message{
+				{ID: assistantID, Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: assistantID, VersionNumber: 1, TotalVersions: 2},
+				{ID: assistantID + 1, Seq: 1, Role: "assistant", Content: "v2", VersionGroupID: assistantID, VersionNumber: 2, TotalVersions: 2},
+			},
+			ActiveVersion:  0,
+			PreviewVersion: 0,
+		},
+		{
+			User: chat.Message{ID: user2ID, Seq: 2, Role: "user", Content: "q2"},
+			AssistantVersions: []chat.Message{
+				{ID: assistant2ID, Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, TotalVersions: 1},
+			},
+			ActiveVersion:  0,
+			PreviewVersion: 0,
+		},
+	}
+	return m
+}
+
+func TestMessageBrowse_EditSaveOnlyMarksTurnWithoutTruncating(t *testing.T) {
+	m := newEditableBrowseModel(t)
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m.messageBrowse.editBuffer = "edited question"
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+	m.messageBrowse.pendingConfirm.cursor = 1 // Save Only
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+
+	turn := m.messageBrowse.turns[0]
+	if !turn.User.EditedAfterGeneration {
+		t.Fatalf("expected user turn to be marked edited")
+	}
+	if !turn.AssistantVersions[turn.ActiveVersion].StaleAfterUserEdit {
+		t.Fatalf("expected assistant turn to be marked stale")
+	}
+	if len(m.messageBrowse.turns) < 2 {
+		t.Fatalf("later turns should be preserved")
+	}
+}

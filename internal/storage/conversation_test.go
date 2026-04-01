@@ -268,3 +268,27 @@ func TestConversationStore_SetActiveVersionAndTruncateAfterSeq(t *testing.T) {
 		t.Fatalf("assistant content = %q, want v2", msgs[1].Content)
 	}
 }
+
+func TestConversationStore_MarkTurnEditedAndClear(t *testing.T) {
+	store := newTestStore(t)
+
+	name := "conv"
+	userID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "old"})
+	assistantID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "reply", VersionNumber: 1})
+
+	if err := store.MarkTurnEdited(userID, assistantID); err != nil {
+		t.Fatalf("MarkTurnEdited() error = %v", err)
+	}
+	msgs, _ := store.LoadActiveTimeline(name)
+	if !msgs[0].EditedAfterGeneration || !msgs[1].StaleAfterUserEdit {
+		t.Fatalf("expected edited/stale flags, got %+v", msgs)
+	}
+
+	if err := store.ClearTurnEdited(userID, assistantID); err != nil {
+		t.Fatalf("ClearTurnEdited() error = %v", err)
+	}
+	msgs, _ = store.LoadActiveTimeline(name)
+	if msgs[0].EditedAfterGeneration || msgs[1].StaleAfterUserEdit {
+		t.Fatalf("expected edited/stale flags to clear, got %+v", msgs)
+	}
+}

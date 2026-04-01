@@ -191,6 +191,9 @@ type messageBrowseState struct {
 	compareCardIdx     int
 	compareCardScrolls map[int]int
 	pendingConfirm     browseConfirmState
+	editMode           bool
+	editBuffer         string
+	editDirty          bool
 }
 
 type Model struct {

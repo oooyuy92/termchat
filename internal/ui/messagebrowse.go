@@ -103,7 +103,69 @@ func (m Model) applyBrowseConfirmation() (Model, tea.Cmd) {
 		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
 		m.statusMsg = "Version applied"
 		return m, nil
+	case confirmEditRegenerate:
+		selected := m.messageBrowse.pendingConfirm.cursor
+		turn := m.currentBrowseTurn()
+		activeAssistant := turn.AssistantVersions[turn.ActiveVersion]
+
+		switch selected {
+		case 0: // Regenerate
+			return m.confirmOrRegenerateEditedTurn()
+		case 1: // Save Only
+			if err := m.store.UpdateMessageContent(turn.User.ID, m.messageBrowse.editBuffer); err != nil {
+				m.statusMsg = "Update failed: " + err.Error()
+				m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+				m.messageBrowse.editMode = false
+				return m, nil
+			}
+			if err := m.store.MarkTurnEdited(turn.User.ID, activeAssistant.ID); err != nil {
+				m.statusMsg = "Mark stale failed: " + err.Error()
+				m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+				m.messageBrowse.editMode = false
+				return m, nil
+			}
+			return m.reloadBrowseTurnState()
+		}
 	}
+	return m, nil
+}
+
+func (m Model) reloadBrowseTurnState() (Model, tea.Cmd) {
+	turn := m.currentBrowseTurn()
+
+	// Reload the user message from storage
+	tab := &m.tabs[m.activeTab]
+	msgs, err := m.store.LoadActiveTimeline(tab.autoSaveName)
+	if err != nil {
+		m.statusMsg = "Reload failed: " + err.Error()
+		return m, nil
+	}
+
+	// Find and update the current turn's user message
+	for _, msg := range msgs {
+		if msg.ID == turn.User.ID {
+			turn.User = msg
+		}
+		// Update assistant versions
+		for i, av := range turn.AssistantVersions {
+			if msg.ID == av.ID {
+				turn.AssistantVersions[i] = msg
+			}
+		}
+	}
+
+	m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+	m.messageBrowse.editMode = false
+	m.statusMsg = "Turn updated"
+	return m, nil
+}
+
+func (m Model) confirmOrRegenerateEditedTurn() (Model, tea.Cmd) {
+	// TODO: implement regenerate logic
+	// For now, just clear edit mode
+	m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+	m.messageBrowse.editMode = false
+	m.statusMsg = "Regenerate not yet implemented"
 	return m, nil
 }
 
@@ -160,9 +222,25 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.messageBrowse.compareCardIdx = m.currentBrowseTurn().PreviewVersion
 		}
 
+	case "e":
+		if len(m.messageBrowse.turns) > 0 {
+			turn := m.currentBrowseTurn()
+			m.messageBrowse.editMode = true
+			m.messageBrowse.editBuffer = turn.User.Content
+			m.messageBrowse.editDirty = false
+		}
+
 	case "enter":
 		if m.messageBrowse.pendingConfirm.kind != confirmNone {
 			return m.applyBrowseConfirmation()
+		}
+		// If in edit mode, open confirmation dialog
+		if m.messageBrowse.editMode {
+			m.messageBrowse.pendingConfirm = browseConfirmState{
+				kind:   confirmEditRegenerate,
+				cursor: 0,
+			}
+			return m, nil
 		}
 		// Old rollback logic - only if not in browse mode with turns
 		if len(m.messageBrowse.turns) > 0 {
