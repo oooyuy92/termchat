@@ -3,7 +3,9 @@ package ui
 import (
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/termchat/termchat/internal/chat"
+	"github.com/termchat/termchat/internal/config"
 )
 
 func makeTabModel(tabNames []string, activeTab int, width int) Model {
@@ -112,5 +114,132 @@ func TestRenderTabBarSingleTab(t *testing.T) {
 	}
 	if !hasSelect {
 		t.Fatal("expected select zone for the single tab")
+	}
+}
+
+func TestNewTabInheritsCurrentWindowDimensions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab, err := newTabSession(cfg, &stubProvider{model: "test-model"}, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+
+	m := Model{
+		cfg:       cfg,
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+	}
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+
+	wantTextareaWidth := m.tabs[0].textarea.Width()
+	wantViewportWidth := m.tabs[0].viewport.Width
+	wantViewportHeight := m.tabs[0].viewport.Height
+
+	m.newTab()
+
+	got := m.tabs[m.activeTab]
+	if got.textarea.Width() != wantTextareaWidth {
+		t.Fatalf("new tab textarea width = %d, want %d", got.textarea.Width(), wantTextareaWidth)
+	}
+	if got.viewport.Width != wantViewportWidth {
+		t.Fatalf("new tab viewport width = %d, want %d", got.viewport.Width, wantViewportWidth)
+	}
+	if got.viewport.Height != wantViewportHeight {
+		t.Fatalf("new tab viewport height = %d, want %d", got.viewport.Height, wantViewportHeight)
+	}
+}
+
+func TestMouseClickNewButtonWorksAfterView(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab, err := newTabSession(cfg, &stubProvider{model: "test-model"}, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+
+	m := Model{
+		cfg:       cfg,
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+	}
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+
+	// Runtime path: Bubble Tea renders the view before the user clicks.
+	_ = m.View()
+
+	var newZone *tabHitZone
+	zones := m.computeTabBarZones()
+	for i := range zones {
+		if zones[i].action == tabHitNew {
+			newZone = &zones[i]
+			break
+		}
+	}
+	if newZone == nil {
+		t.Fatal("expected tabHitNew zone after computing tab layout")
+	}
+
+	next, _ = m.Update(tea.MouseMsg{
+		X:      newZone.startX,
+		Y:      0,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	})
+	updated := next.(Model)
+
+	if len(updated.tabs) != 2 {
+		t.Fatalf("expected click on new-tab button to append a tab, got %d tabs", len(updated.tabs))
+	}
+}
+
+func TestMouseClickCloseButtonWorksAfterView(t *testing.T) {
+	cfg := config.DefaultConfig()
+	first, err := newTabSession(cfg, &stubProvider{model: "tab-1"}, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+	second, err := newTabSession(cfg, &stubProvider{model: "tab-2"}, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+
+	m := Model{
+		cfg:       cfg,
+		theme:     DarkTheme,
+		tabs:      []TabSession{first, second},
+		activeTab: 0,
+	}
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+	_ = m.View()
+
+	var closeZone *tabHitZone
+	zones := m.computeTabBarZones()
+	for i := range zones {
+		if zones[i].action == tabHitClose && zones[i].tabIdx == 0 {
+			closeZone = &zones[i]
+			break
+		}
+	}
+	if closeZone == nil {
+		t.Fatal("expected close zone for first tab")
+	}
+
+	next, _ = m.Update(tea.MouseMsg{
+		X:      closeZone.startX,
+		Y:      0,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	})
+	updated := next.(Model)
+
+	if len(updated.tabs) != 1 {
+		t.Fatalf("expected click on close button to remove a tab, got %d tabs", len(updated.tabs))
 	}
 }

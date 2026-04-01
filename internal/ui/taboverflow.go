@@ -10,8 +10,9 @@ import (
 
 func (m Model) updateTabOverflow(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Count how many tabs are visible (from hit zones)
+	zones := m.computeTabBarZones()
 	visibleCount := 0
-	for _, z := range m.tabBarZones {
+	for _, z := range zones {
 		if z.action == tabHitSelect && z.tabIdx+1 > visibleCount {
 			visibleCount = z.tabIdx + 1
 		}
@@ -40,8 +41,9 @@ func (m Model) updateTabOverflow(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) viewTabOverflow() string {
 	// Count visible tabs from hit zones
+	zones := m.computeTabBarZones()
 	visibleCount := 0
-	for _, z := range m.tabBarZones {
+	for _, z := range zones {
 		if z.action == tabHitSelect && z.tabIdx+1 > visibleCount {
 			visibleCount = z.tabIdx + 1
 		}

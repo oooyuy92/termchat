@@ -168,7 +168,7 @@ func (m Model) View() string {
 		spinnerLine = m.theme.SpinnerStyle().Render(tab2.spinner.View() + " 生成中...")
 	}
 
-	// Dynamic viewport height
+	// Dynamic viewport height calculation
 	vpHeight := m.height -
 		lipgloss.Height(tabBar) -
 		lipgloss.Height(statusBar) -
@@ -176,11 +176,15 @@ func (m Model) View() string {
 	if spinnerLine != "" {
 		vpHeight -= lipgloss.Height(spinnerLine)
 	}
+	// Ensure minimum height
 	if vpHeight < 1 {
 		vpHeight = 1
 	}
+	// Update viewport dimensions and content if height changed
 	if tab2.viewport.Height != vpHeight {
 		tab2.viewport.Height = vpHeight
+		// Re-render content to recalculate scroll boundaries
+		tab2.viewport.SetContent(m.buildChatContent())
 		if tab2.chatFollowBottom {
 			tab2.viewport.GotoBottom()
 		}

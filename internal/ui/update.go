@@ -226,7 +226,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		// Tab bar click (row 0)
 		if msg.Y == 0 && msg.Action == tea.MouseActionPress {
-			zone := m.hitTestTabBar(msg.X)
+			// Compute zones on-demand to avoid stale state from View()'s value receiver
+			zones := m.computeTabBarZones()
+			var zone *tabHitZone
+			for i := range zones {
+				z := &zones[i]
+				if msg.X >= z.startX && msg.X <= z.endX {
+					zone = z
+					break
+				}
+			}
 			if zone != nil {
 				switch zone.action {
 				case tabHitSelect:
@@ -416,6 +425,7 @@ func (m *Model) newTab() tea.Cmd {
 	}
 	m.tabs = append(m.tabs, tab)
 	m.activeTab = len(m.tabs) - 1
+	m.syncActiveTabWindowSize()
 	m.statusMsg = ""
 	return nil
 }
@@ -450,10 +460,27 @@ func (m *Model) switchTab(idx int) {
 		return
 	}
 	m.activeTab = idx
+	m.syncActiveTabWindowSize()
 	m.tabs[idx].viewport.SetContent(m.buildChatContent())
 	if m.tabs[idx].chatFollowBottom {
 		m.tabs[idx].viewport.GotoBottom()
 	}
+}
+
+func (m *Model) syncActiveTabWindowSize() {
+	if len(m.tabs) == 0 {
+		return
+	}
+	tab := &m.tabs[m.activeTab]
+	if m.width > 0 {
+		tab.viewport.Width = m.width
+		tab.textarea.SetWidth(m.width)
+	}
+	vpHeight := m.height - 2
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	tab.viewport.Height = vpHeight
 }
 
 // looksLikeSGRMouse reports whether s contains an SGR mouse sequence

@@ -74,11 +74,14 @@ func newTabSession(cfg config.Config, client chat.Provider, width int) (TabSessi
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
+	vp := viewport.New(0, 0)
+	vp.MouseWheelEnabled = true // Enable mouse wheel scrolling in viewport
+
 	return TabSession{
 		name:             client.Model(),
 		client:           client,
 		history:          chat.NewHistory(),
-		viewport:         viewport.New(0, 0),
+		viewport:         vp,
 		textarea:         ta,
 		spinner:          sp,
 		renderer:         renderer,

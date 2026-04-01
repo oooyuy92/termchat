@@ -11,6 +11,14 @@ import (
 // renderTabBar renders the tab bar and records hit zones for mouse interaction.
 // Returns the rendered string (exactly 1 terminal line wide).
 func (m *Model) renderTabBar() string {
+	zones := m.computeTabBarZones()
+	m.tabBarZones = zones
+	return m.renderTabBarWithZones(zones)
+}
+
+// computeTabBarZones calculates hit zones without rendering.
+// Used by Update() to handle mouse clicks without relying on View()'s stale state.
+func (m *Model) computeTabBarZones() []tabHitZone {
 	const maxNameRunes = 14
 	const newBtn = " + "
 	newBtnWidth := xansi.StringWidth(newBtn)
@@ -63,22 +71,12 @@ func (m *Model) renderTabBar() string {
 	}
 	hiddenCount := len(infos) - visibleCount
 
-	var sb strings.Builder
 	zones := make([]tabHitZone, 0, visibleCount*2+2)
 	x := 0
 
 	for i := 0; i < visibleCount; i++ {
 		info := infos[i]
 		startX := x
-
-		var rendered string
-		if i == m.activeTab {
-			rendered = m.theme.TabActiveStyle().Render(info.label)
-		} else {
-			rendered = m.theme.TabInactiveStyle().Render(info.label)
-		}
-		sb.WriteString(rendered)
-
 		endX := x + info.width
 		// tab layout: [1 pad][name][space][×][1 pad]
 		// close zone starts at the space before ×: 1 + nameWidth
@@ -99,12 +97,7 @@ func (m *Model) renderTabBar() string {
 	}
 
 	// [+] button
-	newRendered := lipgloss.NewStyle().
-		Background(lipgloss.Color(m.theme.TabBarBg)).
-		Foreground(lipgloss.Color(m.theme.TabInactiveFg)).
-		Render(newBtn)
 	zones = append(zones, tabHitZone{startX: x, endX: x + newBtnWidth - 1, action: tabHitNew})
-	sb.WriteString(newRendered)
 	x += newBtnWidth
 
 	// […] overflow button
@@ -115,15 +108,75 @@ func (m *Model) renderTabBar() string {
 		}
 		overflowLabel := fmt.Sprintf(" … %d ", displayCount)
 		overflowW := xansi.StringWidth(overflowLabel)
+		zones = append(zones, tabHitZone{startX: x, endX: x + overflowW - 1, action: tabHitOverflow})
+	}
+
+	return zones
+}
+
+// renderTabBarWithZones renders the tab bar using pre-computed zones.
+func (m *Model) renderTabBarWithZones(zones []tabHitZone) string {
+	const maxNameRunes = 14
+	const newBtn = " + "
+
+	type tabInfo struct {
+		label string
+		width int
+	}
+	infos := make([]tabInfo, len(m.tabs))
+	for i, t := range m.tabs {
+		name := t.name
+		runes := []rune(name)
+		if len(runes) > maxNameRunes {
+			name = string(runes[:maxNameRunes-1]) + "…"
+		}
+		label := name + " ×"
+		w := xansi.StringWidth(name) + xansi.StringWidth(" ×") + 2
+		infos[i] = tabInfo{label: label, width: w}
+	}
+
+	// Count visible tabs from zones
+	visibleCount := 0
+	for _, z := range zones {
+		if z.action == tabHitSelect {
+			visibleCount++
+		}
+	}
+	hiddenCount := len(infos) - visibleCount
+
+	var sb strings.Builder
+
+	for i := 0; i < visibleCount; i++ {
+		info := infos[i]
+		var rendered string
+		if i == m.activeTab {
+			rendered = m.theme.TabActiveStyle().Render(info.label)
+		} else {
+			rendered = m.theme.TabInactiveStyle().Render(info.label)
+		}
+		sb.WriteString(rendered)
+	}
+
+	// [+] button
+	newRendered := lipgloss.NewStyle().
+		Background(lipgloss.Color(m.theme.TabBarBg)).
+		Foreground(lipgloss.Color(m.theme.TabInactiveFg)).
+		Render(newBtn)
+	sb.WriteString(newRendered)
+
+	// […] overflow button
+	if hiddenCount > 0 {
+		displayCount := hiddenCount
+		if displayCount > 99 {
+			displayCount = 99
+		}
+		overflowLabel := fmt.Sprintf(" … %d ", displayCount)
 		overflowRendered := lipgloss.NewStyle().
 			Background(lipgloss.Color(m.theme.TabBarBg)).
 			Foreground(lipgloss.Color(m.theme.TabInactiveFg)).
 			Render(overflowLabel)
-		zones = append(zones, tabHitZone{startX: x, endX: x + overflowW - 1, action: tabHitOverflow})
 		sb.WriteString(overflowRendered)
 	}
-
-	m.tabBarZones = zones
 
 	// Pad to full width
 	bar := lipgloss.NewStyle().
