@@ -204,3 +204,59 @@ func TestMessageBrowse_EditSaveOnlyMarksTurnWithoutTruncating(t *testing.T) {
 		t.Fatalf("later turns should be preserved")
 	}
 }
+
+func TestMessageBrowse_DeleteActiveVersionPromotesNearestRemainingVersion(t *testing.T) {
+	m := newVersionedBrowseModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.turns[0].ActiveVersion = 1
+	m.messageBrowse.turns[0].PreviewVersion = 1
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+
+	if m.messageBrowse.turns[0].ActiveVersion != 0 {
+		t.Fatalf("active version = %d, want 0", m.messageBrowse.turns[0].ActiveVersion)
+	}
+	if m.messageBrowse.turns[0].AssistantVersions[0].Content != "v1" {
+		t.Fatalf("remaining active content = %q, want v1", m.messageBrowse.turns[0].AssistantVersions[0].Content)
+	}
+}
+
+func TestMessageBrowse_BranchUsesPreviewVersionWhenConfirmed(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+	seedConversation(t, store, "conv", []chat.Message{
+		{Seq: 1, Role: "user", Content: "q1"},
+		{Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: 2, VersionNumber: 1},
+		{Seq: 2, Role: "user", Content: "q2"},
+		{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1},
+	})
+	m.tabs[0].autoSaveName = "conv"
+	m.messageBrowse = newVersionedBrowseModel(t).messageBrowse
+	m.messageBrowse.turns[0].PreviewVersion = 1
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	if m.tabs[0].autoSaveName == "conv" {
+		t.Fatalf("expected branch to switch to a new conversation name")
+	}
+	branched, err := store.LoadActiveTimeline(m.tabs[0].autoSaveName)
+	if err != nil {
+		t.Fatalf("LoadActiveTimeline(branch) error = %v", err)
+	}
+	if len(branched) == 0 || branched[1].Content != "v2" {
+		t.Fatalf("branch content = %+v, want preview version v2", branched)
+	}
+}
+
+func TestMessageBrowse_CompareModeMouseWheelSetsFocusedCard(t *testing.T) {
+	m := newVersionedBrowseModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.mode = browseModeCompare
+	m.messageBrowse.compareCardIdx = 0
+
+	next, _ := m.Update(tea.MouseMsg{X: 50, Y: 8, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	m = next.(Model)
+
+	if m.messageBrowse.compareCardIdx == 0 {
+		t.Fatalf("expected mouse wheel to move focus away from first card")
+	}
+}

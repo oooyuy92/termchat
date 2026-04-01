@@ -70,6 +70,13 @@ termchat --no-alt-screen
 - `/shortcuts` — customize keyboard shortcuts
 - Dark and light themes
 
+### Message Version Browser
+
+- Press `Esc` twice to open the browser.
+- In message mode, `↑↓` switches turns and `←→` previews assistant versions.
+- Press `v` to open compare mode for horizontally arranged version cards.
+- Press `e` to edit the user message, then choose `Regenerate` or `Save Only`.
+
 **Compatibility**
 - Works with any OpenAI-compatible API (OpenAI, Azure OpenAI, local models via Ollama, etc.)
 

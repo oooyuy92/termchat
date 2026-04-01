@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/termchat/termchat/internal/chat"
 )
 
 type clipboardResultMsg struct{ Err error }
@@ -264,48 +265,10 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "d":
-		if len(msgs) == 0 {
-			return m, nil
-		}
-		// For now, keep the simple in-memory delete and save
-		// TODO: implement proper storage-level delete in future tasks
-		tab.history.DeleteAt(m.browseCursor)
-		remaining := tab.history.Messages()
-		if len(remaining) == 0 {
-			tab.viewport.SetContent(m.buildChatContent())
-			tab.viewport.GotoBottom()
-			tab.chatFollowBottom = true
-			m.mode = modeChat
-			m.statusMsg = "All messages deleted"
-			return m, m.autoSaveCmd(m.activeTab)
-		}
-		if m.browseCursor >= len(remaining) {
-			m.browseCursor = len(remaining) - 1
-		}
-		return m, m.autoSaveCmd(m.activeTab)
+		return m.deleteCurrentBrowseSelection()
 
 	case "b":
-		// Branch: save history[0..cursor] as a brand-new conversation
-		if len(msgs) == 0 {
-			return m, nil
-		}
-		newName := time.Now().Format("2006-01-02_150405")
-
-		// Save truncated history to new conversation
-		branchMsgs := msgs[:m.browseCursor+1]
-		if err := m.store.Save(newName, branchMsgs); err != nil {
-			m.statusMsg = "Branch failed: " + err.Error()
-			return m, nil
-		}
-
-		tab.autoSaveName = newName
-		tab.history.ReplaceMessages(branchMsgs)
-		tab.viewport.SetContent(m.buildChatContent())
-		tab.viewport.GotoBottom()
-		tab.chatFollowBottom = true
-		m.statusMsg = fmt.Sprintf("Branched at message %d: %s", m.browseCursor+1, newName)
-		m.mode = modeChat
-		return m, nil
+		return m.branchFromCurrentBrowseTurn()
 
 	case "c":
 		if m.browseCursor >= 0 && m.browseCursor < len(msgs) {
@@ -494,4 +457,91 @@ func renderBrowsePane(title, content string, scroll, width, totalHeight int, the
 	}
 
 	return b.String()
+}
+
+func (m Model) deleteCurrentBrowseSelection() (Model, tea.Cmd) {
+	if len(m.messageBrowse.turns) == 0 {
+		return m, nil
+	}
+
+	turn := m.currentBrowseTurn()
+	if len(turn.AssistantVersions) == 0 {
+		return m, nil
+	}
+
+	// Delete the active version (in-memory only for now)
+	activeIdx := turn.ActiveVersion
+
+	// Remove from in-memory list
+	turn.AssistantVersions = append(
+		turn.AssistantVersions[:activeIdx],
+		turn.AssistantVersions[activeIdx+1:]...,
+	)
+
+	// If no versions remain, remove the entire turn
+	if len(turn.AssistantVersions) == 0 {
+		m.messageBrowse.turns = append(
+			m.messageBrowse.turns[:m.messageBrowse.turnIdx],
+			m.messageBrowse.turns[m.messageBrowse.turnIdx+1:]...,
+		)
+		if m.messageBrowse.turnIdx >= len(m.messageBrowse.turns) && m.messageBrowse.turnIdx > 0 {
+			m.messageBrowse.turnIdx--
+		}
+		m.statusMsg = "Turn deleted"
+		return m, nil
+	}
+
+	// Promote nearest remaining version
+	if activeIdx >= len(turn.AssistantVersions) {
+		activeIdx = len(turn.AssistantVersions) - 1
+	}
+	turn.ActiveVersion = activeIdx
+	turn.PreviewVersion = activeIdx
+
+	m.statusMsg = "Version deleted"
+	return m, nil
+}
+
+func (m Model) branchFromCurrentBrowseTurn() (Model, tea.Cmd) {
+	if len(m.messageBrowse.turns) == 0 {
+		return m, nil
+	}
+
+	tab := &m.tabs[m.activeTab]
+
+	// Build branch messages up to current turn
+	var branchMsgs []chat.Message
+
+	for i := 0; i <= m.messageBrowse.turnIdx; i++ {
+		t := &m.messageBrowse.turns[i]
+		branchMsgs = append(branchMsgs, t.User)
+
+		// Use preview version if it differs from active
+		versionIdx := t.ActiveVersion
+		if i == m.messageBrowse.turnIdx && t.PreviewVersion != t.ActiveVersion {
+			versionIdx = t.PreviewVersion
+		}
+
+		if versionIdx < len(t.AssistantVersions) {
+			branchMsgs = append(branchMsgs, t.AssistantVersions[versionIdx])
+		}
+	}
+
+	// Create new conversation
+	newName := time.Now().Format("2006-01-02_150405")
+	if err := m.store.Save(newName, branchMsgs); err != nil {
+		m.statusMsg = "Branch failed: " + err.Error()
+		return m, nil
+	}
+
+	// Switch to new conversation
+	tab.autoSaveName = newName
+	tab.history.ReplaceMessages(branchMsgs)
+	tab.viewport.SetContent(m.buildChatContent())
+	tab.viewport.GotoBottom()
+	tab.chatFollowBottom = true
+
+	m.statusMsg = fmt.Sprintf("Branched to: %s", newName)
+	m.mode = modeChat
+	return m, nil
 }
