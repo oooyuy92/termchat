@@ -476,14 +476,14 @@ func (s *Store) MarkTurnEdited(userID, assistantID int64) error {
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(
-		`UPDATE messages SET stale_after_user_edit = 1 WHERE id = ?`,
+		`UPDATE messages SET edited_after_generation = 1 WHERE id = ?`,
 		userID,
 	); err != nil {
 		return err
 	}
 
 	if _, err := tx.Exec(
-		`UPDATE messages SET edited_after_generation = 1 WHERE id = ?`,
+		`UPDATE messages SET stale_after_user_edit = 1 WHERE id = ?`,
 		assistantID,
 	); err != nil {
 		return err
@@ -501,14 +501,14 @@ func (s *Store) ClearTurnEdited(userID, assistantID int64) error {
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(
-		`UPDATE messages SET stale_after_user_edit = 0 WHERE id = ?`,
+		`UPDATE messages SET edited_after_generation = 0 WHERE id = ?`,
 		userID,
 	); err != nil {
 		return err
 	}
 
 	if _, err := tx.Exec(
-		`UPDATE messages SET edited_after_generation = 0 WHERE id = ?`,
+		`UPDATE messages SET stale_after_user_edit = 0 WHERE id = ?`,
 		assistantID,
 	); err != nil {
 		return err
