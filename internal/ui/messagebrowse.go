@@ -152,8 +152,9 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) viewMessageBrowse() string {
 	tabBar := (&m).renderTabBar()
 	tab := m.activeTabSession()
-	msgs := tab.history.Messages()
-	if len(msgs) == 0 {
+
+	// If no turns, show empty state
+	if len(m.messageBrowse.turns) == 0 {
 		var b strings.Builder
 		b.WriteString(m.theme.ConfigTitleStyle().Render("Browse Messages") + "\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  No messages.") + "\n\n")
@@ -161,62 +162,132 @@ func (m Model) viewMessageBrowse() string {
 		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
 	}
 
-	cur := m.browseCursor
-	if cur >= len(msgs) {
-		cur = len(msgs) - 1
+	// Get current turn
+	turnIdx := m.messageBrowse.turnIdx
+	if turnIdx >= len(m.messageBrowse.turns) {
+		turnIdx = len(m.messageBrowse.turns) - 1
 	}
-	selected := msgs[cur]
+	turn := m.messageBrowse.turns[turnIdx]
 
-	var b strings.Builder
-
-	// Header line
-	header := fmt.Sprintf("── Message %d / %d ── %s ", cur+1, len(msgs), selected.Role)
-	headerRunes := utf8.RuneCountInString(header)
-	if m.width > headerRunes+2 {
-		header += strings.Repeat("─", m.width-headerRunes-1)
+	// Calculate pane width (split screen in half, minus some padding)
+	paneWidth := (m.width - 3) / 2
+	if paneWidth < 20 {
+		paneWidth = 20
 	}
-	b.WriteString(m.theme.ConfigTitleStyle().Render(header) + "\n\n")
 
-	// Full message content
-	var content string
-	if selected.Role == "assistant" {
-		rendered, err := tab.renderer.Render(selected.Content)
+	// Render left pane (User)
+	left := renderBrowsePane("User", turn.User.Content, m.messageBrowse.leftScroll, paneWidth, m.height, m.theme)
+
+	// Render right pane (Assistant with version)
+	var right string
+	if len(turn.AssistantVersions) > 0 {
+		previewIdx := turn.PreviewVersion
+		if previewIdx >= len(turn.AssistantVersions) {
+			previewIdx = 0
+		}
+		rightMsg := turn.AssistantVersions[previewIdx]
+		rightTitle := fmt.Sprintf("Assistant v%d/%d", rightMsg.VersionNumber, rightMsg.TotalVersions)
+
+		// Render assistant content with markdown
+		var content string
+		rendered, err := tab.renderer.Render(rightMsg.Content)
 		if err != nil {
-			content = selected.Content
+			content = rightMsg.Content
 		} else {
 			content = cleanGlamourOutput(rendered)
 		}
+		right = renderBrowsePane(rightTitle, content, m.messageBrowse.rightScroll, paneWidth, m.height, m.theme)
 	} else {
-		content = selected.Content
+		right = renderBrowsePane("Assistant", "(no versions)", 0, paneWidth, m.height, m.theme)
 	}
 
-	// Clip content to available height to avoid overflow
-	// Available lines = total height - tabbar(1) - header(2) - blank(1) - divider(1) - help(1) - status(1) - blank(1)
-	availableLines := m.height - 8
-	if availableLines < 1 {
-		availableLines = 1
+	// Join panes horizontally
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+
+	// Footer help
+	help := m.theme.ConfigHelpStyle().Render(
+		"↑↓: turn  ←→: version  e: edit  g: new version  v: compare  Enter: apply/confirm  Esc: back",
+	)
+
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, body, help, m.renderStatusBar())
+}
+
+// renderBrowsePane renders a single pane with title, content, and scroll handling
+func renderBrowsePane(title, content string, scroll, width, totalHeight int, theme Theme) string {
+	// Calculate available height for content
+	// totalHeight - tabbar(1) - help(1) - status(1) - padding(3)
+	availableHeight := totalHeight - 6
+	if availableHeight < 5 {
+		availableHeight = 5
 	}
+
+	// Split content into lines
 	contentLines := strings.Split(content, "\n")
-	clipped := false
-	if len(contentLines) > availableLines {
-		contentLines = contentLines[:availableLines]
-		clipped = true
-	}
-	b.WriteString(strings.Join(contentLines, "\n"))
-	if clipped {
-		b.WriteString("\n" + m.theme.ConfigHelpStyle().Render("(↓ more…)"))
-	}
-	b.WriteString("\n\n")
 
-	// Bottom divider
-	divider := strings.Repeat("─", m.width-1)
-	if m.width <= 1 {
-		divider = "─"
+	// Apply scroll offset
+	startLine := scroll
+	if startLine >= len(contentLines) {
+		startLine = len(contentLines) - 1
 	}
-	b.WriteString(divider + "\n")
-	b.WriteString(m.theme.ConfigHelpStyle().Render(
-		"↑↓: prev/next  Enter: rollback  d: delete  b: branch  c: copy  Esc: back",
-	) + "\n")
+	if startLine < 0 {
+		startLine = 0
+	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
+	endLine := startLine + availableHeight
+	if endLine > len(contentLines) {
+		endLine = len(contentLines)
+	}
+
+	visibleLines := contentLines[startLine:endLine]
+
+	// Wrap each line to fit pane width
+	var wrappedLines []string
+	for _, line := range visibleLines {
+		if utf8.RuneCountInString(line) <= width {
+			wrappedLines = append(wrappedLines, line)
+		} else {
+			// Simple word wrap
+			runes := []rune(line)
+			for len(runes) > 0 {
+				if len(runes) <= width {
+					wrappedLines = append(wrappedLines, string(runes))
+					break
+				}
+				wrappedLines = append(wrappedLines, string(runes[:width]))
+				runes = runes[width:]
+			}
+		}
+	}
+
+	// Pad lines to consistent width
+	for i, line := range wrappedLines {
+		lineLen := utf8.RuneCountInString(line)
+		if lineLen < width {
+			wrappedLines[i] = line + strings.Repeat(" ", width-lineLen)
+		}
+	}
+
+	// Build pane
+	var b strings.Builder
+
+	// Title bar
+	titleBar := " " + title + " "
+	titleLen := utf8.RuneCountInString(titleBar)
+	if titleLen < width {
+		titleBar += strings.Repeat("─", width-titleLen)
+	}
+	b.WriteString(theme.ConfigTitleStyle().Render(titleBar) + "\n")
+
+	// Content
+	b.WriteString(strings.Join(wrappedLines, "\n"))
+
+	// Scroll indicators
+	if startLine > 0 {
+		b.WriteString("\n" + theme.ConfigHelpStyle().Render("(↑ more…)"))
+	}
+	if endLine < len(contentLines) {
+		b.WriteString("\n" + theme.ConfigHelpStyle().Render("(↓ more…)"))
+	}
+
+	return b.String()
 }

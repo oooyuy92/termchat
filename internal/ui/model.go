@@ -151,6 +151,34 @@ type streamControl struct {
 	cancel context.CancelFunc
 }
 
+type browseMode int
+
+const (
+	browseModeMessage browseMode = iota
+	browseModeCompare
+)
+
+type browseTurn struct {
+	User              chat.Message
+	AssistantVersions []chat.Message
+	ActiveVersion     int
+	PreviewVersion    int
+}
+
+func (t browseTurn) VersionCount() int {
+	return len(t.AssistantVersions)
+}
+
+type messageBrowseState struct {
+	mode               browseMode
+	turns              []browseTurn
+	turnIdx            int
+	leftScroll         int
+	rightScroll        int
+	compareCardIdx     int
+	compareCardScrolls map[int]int
+}
+
 type Model struct {
 	cfg      config.Config
 	store    *storage.Store
@@ -178,6 +206,7 @@ type Model struct {
 	cfgPath          string
 	slashAC          slashComplete
 	escCount         int // consecutive Esc presses in chat mode for double-Esc detection
+	messageBrowse    messageBrowseState
 	browseCursor     int // index of selected message in modeMessageBrowse
 	confirmQuit      bool
 	statusMsg        string
