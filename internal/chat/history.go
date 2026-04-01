@@ -8,9 +8,16 @@ type ImageData struct {
 }
 
 type Message struct {
-	Role    string      `json:"role"`
-	Content string      `json:"content"`
-	Images  []ImageData `json:"-"`
+	ID                    int64       `json:"id"`
+	Seq                   int         `json:"seq"`
+	Role                  string      `json:"role"`
+	Content               string      `json:"content"`
+	Images                []ImageData `json:"-"`
+	VersionGroupID        int64       `json:"version_group_id"`
+	VersionNumber         int         `json:"version_number"`
+	TotalVersions         int         `json:"total_versions"`
+	EditedAfterGeneration bool        `json:"edited_after_generation"`
+	StaleAfterUserEdit    bool        `json:"stale_after_user_edit"`
 }
 
 type History struct {
@@ -66,4 +73,8 @@ func (h *History) Truncate(n int) {
 		return
 	}
 	h.messages = h.messages[:n]
+}
+
+func (h *History) ReplaceMessages(messages []Message) {
+	h.messages = append(h.messages[:0], messages...)
 }

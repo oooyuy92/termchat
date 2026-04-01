@@ -114,3 +114,49 @@ func TestHistory_Truncate_Noop(t *testing.T) {
 		t.Errorf("len = %d, want 1", len(h.Messages()))
 	}
 }
+
+func TestHistory_MessagesPreserveMetadata(t *testing.T) {
+	h := NewHistory()
+	h.Add(Message{
+		ID:                   42,
+		Seq:                  7,
+		Role:                 "assistant",
+		Content:              "v2 reply",
+		VersionGroupID:       40,
+		VersionNumber:        2,
+		TotalVersions:        4,
+		EditedAfterGeneration: false,
+		StaleAfterUserEdit:    true,
+	})
+
+	msgs := h.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("len = %d, want 1", len(msgs))
+	}
+	if msgs[0].ID != 42 || msgs[0].Seq != 7 {
+		t.Fatalf("got message IDs %+v, want ID=42 seq=7", msgs[0])
+	}
+	if msgs[0].VersionGroupID != 40 || msgs[0].VersionNumber != 2 || msgs[0].TotalVersions != 4 {
+		t.Fatalf("got version metadata %+v", msgs[0])
+	}
+	if !msgs[0].StaleAfterUserEdit {
+		t.Fatalf("expected stale flag to be preserved")
+	}
+}
+
+func TestHistory_ReplaceMessages(t *testing.T) {
+	h := NewHistory()
+	h.Add(Message{Role: "user", Content: "first"})
+	h.ReplaceMessages([]Message{
+		{ID: 1, Seq: 1, Role: "user", Content: "edited"},
+		{ID: 2, Seq: 1, Role: "assistant", Content: "active reply", VersionGroupID: 2, VersionNumber: 1, TotalVersions: 3},
+	})
+
+	msgs := h.Messages()
+	if len(msgs) != 2 {
+		t.Fatalf("len = %d, want 2", len(msgs))
+	}
+	if msgs[0].Content != "edited" || msgs[1].Content != "active reply" {
+		t.Fatalf("ReplaceMessages() = %+v", msgs)
+	}
+}
