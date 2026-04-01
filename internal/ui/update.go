@@ -180,7 +180,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				tab.imageCounter = 0
 				m.statusMsg = "⚠ 当前模型不支持图片，已忽略"
 			}
-			tab.history.Add(chat.Message{Role: "user", Content: input, Images: tab.pendingImages})
+
+			// Create user message with next sequence number
+			userMsg := chat.Message{
+				Seq:     nextSeq(tab.history.Messages()),
+				Role:    "user",
+				Content: input,
+				Images:  tab.pendingImages,
+			}
+
+			// Persist user message to storage
+			userID, err := m.store.AppendMessage(tab.autoSaveName, userMsg)
+			if err != nil {
+				m.statusMsg = "Save failed: " + err.Error()
+				return m, nil
+			}
+			userMsg.ID = userID
+
+			// Add to history
+			tab.history.Add(userMsg)
 			tab.pendingImages = nil
 			tab.streaming = true
 			tab.chatFollowBottom = true
@@ -288,7 +306,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t := &m.tabs[msg.TabIdx]
 			t.streaming = false
 			if t.currentResp != "" {
-				t.history.Add(chat.Message{Role: "assistant", Content: t.currentResp})
+				// Get the user message to determine the sequence number
+				msgs := t.history.Messages()
+				var userMsg chat.Message
+				if len(msgs) > 0 {
+					userMsg = msgs[len(msgs)-1]
+				}
+
+				// Create assistant message
+				assistantMsg := chat.Message{
+					Seq:           userMsg.Seq,
+					Role:          "assistant",
+					Content:       t.currentResp,
+					VersionNumber: 1,
+				}
+
+				// Persist assistant message to storage
+				assistantID, err := m.store.AppendMessage(t.autoSaveName, assistantMsg)
+				if err == nil {
+					assistantMsg.ID = assistantID
+				}
+
+				t.history.Add(assistantMsg)
 			}
 			t.currentResp = ""
 			t.currentThinking = ""
@@ -302,7 +341,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.TabIdx == m.activeTab {
 			m.escCount = 0
 		}
-		return m, m.autoSaveCmd(msg.TabIdx)
+		return m, nil
 
 	case streamErrMsg:
 		if msg.TabIdx < len(m.tabs) {
@@ -643,4 +682,26 @@ func (m Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 		m.statusMsg = "Unknown command: " + cmd
 		return m, nil
 	}
+}
+
+// nextSeq returns the next sequence number for a new message.
+func nextSeq(msgs []chat.Message) int {
+	if len(msgs) == 0 {
+		return 1
+	}
+	return msgs[len(msgs)-1].Seq + 1
+}
+
+// reloadActiveTimeline reloads the active timeline from storage for the given tab.
+func (m *Model) reloadActiveTimeline(tabIdx int) error {
+	name := m.tabs[tabIdx].autoSaveName
+	msgs, err := m.store.LoadActiveTimeline(name)
+	if err != nil {
+		return err
+	}
+	m.tabs[tabIdx].history.ReplaceMessages(msgs)
+	m.tabs[tabIdx].viewport.SetContent(m.buildChatContent())
+	m.tabs[tabIdx].viewport.GotoBottom()
+	m.tabs[tabIdx].chatFollowBottom = true
+	return nil
 }

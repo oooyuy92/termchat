@@ -167,19 +167,16 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			convName = p.groups[p.dateIdx].convs[p.convIdx].Name
 		}
-		msgs, err := m.store.Load(convName)
+		msgs, err := m.store.LoadActiveTimeline(convName)
 		if err != nil {
 			m.statusMsg = "Load failed: " + err.Error()
 			m.mode = modeChat
 			return m, nil
 		}
 		m.activeTabSession().autoSaveName = convName
-		m.activeTabSession().history.Clear()
+		m.activeTabSession().history.ReplaceMessages(msgs)
 		m.activeTabSession().history.SetSystemPrompt("")
 		m.activeRole = ""
-		for _, msg := range msgs {
-			m.activeTabSession().history.Add(msg)
-		}
 		m.activeTabSession().viewport.SetContent(m.buildChatContent())
 		m.activeTabSession().viewport.GotoBottom()
 		m.activeTabSession().chatFollowBottom = true
@@ -230,7 +227,7 @@ func (m Model) updateExportPick(msg tea.KeyMsg) (Model, tea.Cmd) {
 			msgs = m.activeTabSession().history.Messages()
 		} else {
 			var err error
-			msgs, err = m.store.Load(conv.Name)
+			msgs, err = m.store.LoadActiveTimeline(conv.Name)
 			if err != nil {
 				m.statusMsg = "Export failed: " + err.Error()
 				return m, nil

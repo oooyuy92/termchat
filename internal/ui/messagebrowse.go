@@ -80,19 +80,28 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "enter":
 		// Rollback: keep messages[0..cursor] inclusive
-		n := m.browseCursor + 1
-		tab.history.Truncate(n)
-		tab.viewport.SetContent(m.buildChatContent())
-		tab.viewport.GotoBottom()
-		tab.chatFollowBottom = true
-		m.statusMsg = fmt.Sprintf("Rolled back to message %d", n)
+		if len(msgs) == 0 {
+			return m, nil
+		}
+		targetMsg := msgs[m.browseCursor]
+		if err := m.store.TruncateAfterSeq(tab.autoSaveName, targetMsg.Seq); err != nil {
+			m.statusMsg = "Rollback failed: " + err.Error()
+			return m, nil
+		}
+		if err := m.reloadActiveTimeline(m.activeTab); err != nil {
+			m.statusMsg = "Reload failed: " + err.Error()
+			return m, nil
+		}
+		m.statusMsg = fmt.Sprintf("Rolled back to message %d", m.browseCursor+1)
 		m.mode = modeChat
-		return m, m.autoSaveCmd(m.activeTab)
+		return m, nil
 
 	case "d":
 		if len(msgs) == 0 {
 			return m, nil
 		}
+		// For now, keep the simple in-memory delete and save
+		// TODO: implement proper storage-level delete in future tasks
 		tab.history.DeleteAt(m.browseCursor)
 		remaining := tab.history.Messages()
 		if len(remaining) == 0 {
@@ -110,15 +119,26 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "b":
 		// Branch: save history[0..cursor] as a brand-new conversation
+		if len(msgs) == 0 {
+			return m, nil
+		}
 		newName := time.Now().Format("2006-01-02_150405")
-		tab.history.Truncate(m.browseCursor + 1)
+
+		// Save truncated history to new conversation
+		branchMsgs := msgs[:m.browseCursor+1]
+		if err := m.store.Save(newName, branchMsgs); err != nil {
+			m.statusMsg = "Branch failed: " + err.Error()
+			return m, nil
+		}
+
 		tab.autoSaveName = newName
+		tab.history.ReplaceMessages(branchMsgs)
 		tab.viewport.SetContent(m.buildChatContent())
 		tab.viewport.GotoBottom()
 		tab.chatFollowBottom = true
 		m.statusMsg = fmt.Sprintf("Branched at message %d: %s", m.browseCursor+1, newName)
 		m.mode = modeChat
-		return m, m.autoSaveCmd(m.activeTab)
+		return m, nil
 
 	case "c":
 		if m.browseCursor >= 0 && m.browseCursor < len(msgs) {
