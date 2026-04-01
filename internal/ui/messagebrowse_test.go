@@ -2,6 +2,8 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -9,6 +11,45 @@ import (
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/storage"
 )
+
+type streamingStubProvider struct {
+	stubProvider
+	response string
+	received []chat.Message
+}
+
+func (s *streamingStubProvider) SendStreamChan(_ context.Context, messages []chat.Message, _ float64, _ int, _ string, _ int) (<-chan chat.StreamChunk, <-chan error) {
+	s.received = append([]chat.Message(nil), messages...)
+
+	chunks := make(chan chat.StreamChunk, 1)
+	errs := make(chan error, 1)
+	chunks <- chat.StreamChunk{Content: s.response}
+	close(chunks)
+	close(errs)
+	return chunks, errs
+}
+
+type erroringProvider struct {
+	model string
+	err   error
+}
+
+func (p *erroringProvider) SendStreamChan(_ context.Context, _ []chat.Message, _ float64, _ int, _ string, _ int) (<-chan chat.StreamChunk, <-chan error) {
+	chunks := make(chan chat.StreamChunk)
+	errs := make(chan error, 1)
+	errs <- p.err
+	close(chunks)
+	close(errs)
+	return chunks, errs
+}
+
+func (p *erroringProvider) Model() string         { return p.model }
+func (p *erroringProvider) SetModel(model string) { p.model = model }
+func (p *erroringProvider) SetBaseURL(string)     {}
+func (p *erroringProvider) SetAPIKey(string)      {}
+func (p *erroringProvider) BaseURL() string       { return "" }
+func (p *erroringProvider) APIKey() string        { return "" }
+func (p *erroringProvider) SupportsVision() bool  { return false }
 
 func newBrowserTestStore(t *testing.T) *storage.Store {
 	t.Helper()
@@ -258,12 +299,39 @@ func TestMessageBrowse_EditSaveOnlyMarksTurnWithoutTruncating(t *testing.T) {
 }
 
 func TestMessageBrowse_DeleteActiveVersionPromotesNearestRemainingVersion(t *testing.T) {
-	m := newVersionedBrowseModel(t)
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	const name = "conv"
+	_, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(v1) error = %v", err)
+	}
+	if err := store.InitVersionGroup(assistantID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	_, err = store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2})
+	if err != nil {
+		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
+	}
+	if err := store.SetActiveVersion(name, assistantID, 2); err != nil {
+		t.Fatalf("SetActiveVersion() error = %v", err)
+	}
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
 	m.mode = modeMessageBrowse
-	m.messageBrowse.turns[0].ActiveVersion = 1
-	m.messageBrowse.turns[0].PreviewVersion = 1
 
 	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m.messageBrowse.pendingConfirm.cursor = deleteAssistantOnly
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if m.messageBrowse.turns[0].ActiveVersion != 0 {
 		t.Fatalf("active version = %d, want 0", m.messageBrowse.turns[0].ActiveVersion)
@@ -299,41 +367,49 @@ func TestMessageBrowse_BranchUsesPreviewVersionWhenConfirmed(t *testing.T) {
 	}
 }
 
-func TestMessageBrowse_CompareModeMouseWheelSetsFocusedCard(t *testing.T) {
+func TestMessageBrowse_CompareModeMouseWheelScrollsHoveredCard(t *testing.T) {
 	m := newVersionedBrowseModel(t)
 	m.mode = modeMessageBrowse
 	m.messageBrowse.mode = browseModeCompare
 	m.messageBrowse.compareCardIdx = 0
+	m.width = 80
+	m.height = 24
 
 	next, _ := m.Update(tea.MouseMsg{X: 50, Y: 8, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
 	m = next.(Model)
 
-	if m.messageBrowse.compareCardIdx == 0 {
-		t.Fatalf("expected mouse wheel to move focus away from first card")
+	if m.messageBrowse.compareCardIdx != 1 {
+		t.Fatalf("compareCardIdx = %d, want 1", m.messageBrowse.compareCardIdx)
+	}
+	if got := m.messageBrowse.compareCardScrolls[1]; got != 1 {
+		t.Fatalf("compareCardScrolls[1] = %d, want 1", got)
+	}
+	if got := m.messageBrowse.compareCardScrolls[0]; got != 0 {
+		t.Fatalf("compareCardScrolls[0] = %d, want 0", got)
 	}
 }
 
 func TestMessageBrowse_InitializeFromHistory(t *testing.T) {
 	store := newBrowserTestStore(t)
 	m := newBrowserTestModel(t, store)
-	
+
 	// Seed conversation with 2 turns
 	seedConversation(t, store, "test", []seedTurn{
 		{user: "first", assistant: []string{"response 1"}},
 		{user: "second", assistant: []string{"response 2a", "response 2b"}},
 	})
-	
+
 	// Load into tab
 	msgs := mustLoadActiveTimeline(t, store, "test")
 	m.tabs[0].history.ReplaceMessages(msgs)
 	m.tabs[0].autoSaveName = "test"
-	
+
 	// Simulate double-Esc
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(Model)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(Model)
-	
+
 	// Verify browser state initialized
 	if m.mode != modeMessageBrowse {
 		t.Fatal("expected modeMessageBrowse")
@@ -344,7 +420,7 @@ func TestMessageBrowse_InitializeFromHistory(t *testing.T) {
 	if m.messageBrowse.turnIdx != 1 {
 		t.Fatalf("expected turnIdx=1 (last turn), got %d", m.messageBrowse.turnIdx)
 	}
-	
+
 	// Verify turn 1
 	turn0 := m.messageBrowse.turns[0]
 	if turn0.User.Content != "first" {
@@ -353,7 +429,7 @@ func TestMessageBrowse_InitializeFromHistory(t *testing.T) {
 	if len(turn0.AssistantVersions) != 1 {
 		t.Fatalf("turn 0: expected 1 version, got %d", len(turn0.AssistantVersions))
 	}
-	
+
 	// Verify turn 2
 	turn1 := m.messageBrowse.turns[1]
 	if turn1.User.Content != "second" {
@@ -367,5 +443,680 @@ func TestMessageBrowse_InitializeFromHistory(t *testing.T) {
 	}
 	if turn1.PreviewVersion != 0 {
 		t.Errorf("turn 1: expected PreviewVersion=0, got %d", turn1.PreviewVersion)
+	}
+}
+
+func TestMessageBrowse_UpDownMovesTurnSelection(t *testing.T) {
+	m := newVersionedBrowseModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.mode = browseModeMessage
+	m.messageBrowse.turnIdx = 0
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyDown})
+	if m.messageBrowse.turnIdx != 1 {
+		t.Fatalf("turnIdx after down = %d, want 1", m.messageBrowse.turnIdx)
+	}
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyUp})
+	if m.messageBrowse.turnIdx != 0 {
+		t.Fatalf("turnIdx after up = %d, want 0", m.messageBrowse.turnIdx)
+	}
+}
+
+func TestMessageBrowse_ApplyPreviewPersistsWithoutLaterTurns(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	seedConversation(t, store, "conv", []seedTurn{
+		{user: "q1", assistant: []string{"v1", "v2"}},
+	})
+
+	m.tabs[0].autoSaveName = "conv"
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, "conv"))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRight})
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+
+	reloaded := mustLoadActiveTimeline(t, store, "conv")
+	if got := reloaded[1].Content; got != "v2" {
+		t.Fatalf("active timeline assistant = %q, want v2", got)
+	}
+	if got := m.tabs[0].history.Messages()[1].Content; got != "v2" {
+		t.Fatalf("tab history assistant = %q, want v2", got)
+	}
+	if got := m.messageBrowse.turns[0].ActiveVersion; got != 1 {
+		t.Fatalf("ActiveVersion = %d, want 1", got)
+	}
+}
+
+func TestMessageBrowse_DeletePersistsToStorage(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	const name = "conv"
+	_, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(v1) error = %v", err)
+	}
+	if err := store.InitVersionGroup(assistantID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2})
+	if err != nil {
+		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
+	}
+	if err := store.SetActiveVersion(name, assistantID, 2); err != nil {
+		t.Fatalf("SetActiveVersion() error = %v", err)
+	}
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m.messageBrowse.pendingConfirm.cursor = deleteAssistantOnly
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+
+	reloaded := mustLoadActiveTimeline(t, store, name)
+	if got := reloaded[1].Content; got != "v1" {
+		t.Fatalf("active timeline assistant = %q, want v1", got)
+	}
+	if got := m.tabs[0].history.Messages()[1].ID; got != assistantID {
+		t.Fatalf("tab history assistant ID = %d, want %d", got, assistantID)
+	}
+	if got := m.messageBrowse.turns[0].ActiveVersion; got != 0 {
+		t.Fatalf("ActiveVersion = %d, want 0", got)
+	}
+	if got := m.messageBrowse.turns[0].AssistantVersions[0].ID; got == v2ID {
+		t.Fatalf("deleted version %d still present in browser", v2ID)
+	}
+}
+
+func TestMessageBrowse_DeleteAssistantRemovesPreviewVersion(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	const name = "conv"
+	_, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(v1) error = %v", err)
+	}
+	if err := store.InitVersionGroup(assistantID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{
+		Seq:           1,
+		Role:          "assistant",
+		Content:       "v2",
+		VersionNumber: 2,
+	})
+	if err != nil {
+		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
+	}
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+	m.messageBrowse.turns[0].PreviewVersion = 1
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if m.messageBrowse.pendingConfirm.kind != confirmDeleteSelection {
+		t.Fatalf("pendingConfirm = %v, want confirmDeleteSelection", m.messageBrowse.pendingConfirm.kind)
+	}
+	m.messageBrowse.pendingConfirm.cursor = deleteAssistantOnly
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if len(m.messageBrowse.turns) != 1 {
+		t.Fatalf("turn count = %d, want 1", len(m.messageBrowse.turns))
+	}
+	if len(m.messageBrowse.turns[0].AssistantVersions) != 1 {
+		t.Fatalf("assistant version count = %d, want 1", len(m.messageBrowse.turns[0].AssistantVersions))
+	}
+	if got := m.messageBrowse.turns[0].AssistantVersions[0].ID; got == v2ID {
+		t.Fatalf("preview version %d still present", v2ID)
+	}
+
+	reloaded, err := store.LoadBrowseMessages(name)
+	if err != nil {
+		t.Fatalf("LoadBrowseMessages() error = %v", err)
+	}
+	var deletedPreview bool
+	for _, msg := range reloaded {
+		if msg.ID == v2ID {
+			deletedPreview = msg.Deleted
+		}
+	}
+	if !deletedPreview {
+		t.Fatalf("preview version %d not marked deleted", v2ID)
+	}
+}
+
+func TestMessageBrowse_DeleteLastAssistantKeepsEmptyTurn(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	const name = "conv"
+	_, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	_, err = store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(v1) error = %v", err)
+	}
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m.messageBrowse.pendingConfirm.cursor = deleteAssistantOnly
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if len(m.messageBrowse.turns) != 1 {
+		t.Fatalf("turn count = %d, want 1", len(m.messageBrowse.turns))
+	}
+	if m.messageBrowse.turns[0].User.Deleted {
+		t.Fatalf("user should remain visible")
+	}
+	if got := len(m.messageBrowse.turns[0].AssistantVersions); got != 0 {
+		t.Fatalf("assistant version count = %d, want 0", got)
+	}
+}
+
+func TestMessageBrowse_DeleteBothRemovesTurnAndUndoRestoresIt(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	const name = "conv"
+	seedConversation(t, store, name, []seedTurn{
+		{user: "q1", assistant: []string{"a1"}},
+	})
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m.messageBrowse.pendingConfirm.cursor = deleteBothSides
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if len(m.messageBrowse.turns) != 0 {
+		t.Fatalf("turn count after delete both = %d, want 0", len(m.messageBrowse.turns))
+	}
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	if len(m.messageBrowse.turns) != 1 {
+		t.Fatalf("turn count after undo = %d, want 1", len(m.messageBrowse.turns))
+	}
+	if got := m.messageBrowse.turns[0].User.Content; got != "q1" {
+		t.Fatalf("restored user = %q, want q1", got)
+	}
+	if got := m.messageBrowse.turns[0].AssistantVersions[0].Content; got != "a1" {
+		t.Fatalf("restored assistant = %q, want a1", got)
+	}
+}
+
+func TestMessageBrowse_BranchReloadsFreshMessageIDs(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	const name = "conv"
+	userID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(v1) error = %v", err)
+	}
+	if err := store.InitVersionGroup(assistantID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2})
+	if err != nil {
+		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
+	}
+	_, err = store.AppendMessage(name, chat.Message{Seq: 2, Role: "user", Content: "q2"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user2) error = %v", err)
+	}
+	_, err = store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(a2) error = %v", err)
+	}
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+	m.messageBrowse.turnIdx = 0
+	m.messageBrowse.turns[0].PreviewVersion = 1
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+
+	if m.tabs[0].autoSaveName == name {
+		t.Fatalf("expected branch to switch to a new conversation name")
+	}
+
+	branched := mustLoadActiveTimeline(t, store, m.tabs[0].autoSaveName)
+	historyMsgs := m.tabs[0].history.Messages()
+	if got := branched[0].ID; got == userID {
+		t.Fatalf("branched user ID = %d, want fresh row ID", got)
+	}
+	if got := historyMsgs[0].ID; got != branched[0].ID {
+		t.Fatalf("tab history user ID = %d, want %d", got, branched[0].ID)
+	}
+	if got := historyMsgs[1].ID; got != branched[1].ID {
+		t.Fatalf("tab history assistant ID = %d, want %d", got, branched[1].ID)
+	}
+	if got := historyMsgs[1].ID; got == v2ID {
+		t.Fatalf("tab history assistant ID = %d, want fresh row ID", got)
+	}
+	if got := historyMsgs[1].Content; got != "v2" {
+		t.Fatalf("tab history assistant content = %q, want v2", got)
+	}
+}
+
+func TestMessageBrowse_RegenerateEditedTurnPersistsAndClearsFlags(t *testing.T) {
+	store := newBrowserTestStore(t)
+	cfg := config.DefaultConfig()
+	provider := &streamingStubProvider{
+		stubProvider: stubProvider{model: "test-model"},
+		response:     "regenerated answer",
+	}
+	tab, err := newTabSession(cfg, provider, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+
+	m := Model{
+		cfg:       cfg,
+		store:     store,
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     80,
+		height:    24,
+		providerFactory: func(providerType, baseURL, apiKey, model string) chat.Provider {
+			return provider
+		},
+		modelRegistry: config.ModelRegistry{
+			Providers: []config.ProviderEntry{
+				{
+					Name:     "test-provider",
+					Provider: "openai-compatible",
+					BaseURL:  "https://example.test/v1",
+					APIKey:   "k",
+					Models:   []config.ModelEntry{{Name: "test-model", Model: "test-model"}},
+				},
+			},
+		},
+	}
+
+	seedConversationLegacy(t, store, "conv", []chat.Message{
+		{Seq: 1, Role: "user", Content: "old question"},
+		{Seq: 1, Role: "assistant", Content: "old answer", VersionNumber: 1, SnapshotProvider: "test-provider", SnapshotModel: "test-model", SnapshotRoleName: "writer", SnapshotRolePrompt: "system prompt"},
+	})
+
+	m.tabs[0].autoSaveName = "conv"
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, "conv"))
+	m.tabs[0].history.SetSystemPrompt("system prompt")
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m.messageBrowse.editBuffer = "edited question"
+	m.messageBrowse.editDirty = true
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+	m.messageBrowse.pendingConfirm.cursor = 0
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+
+	reloaded := mustLoadActiveTimeline(t, store, "conv")
+	if got := reloaded[0].Content; got != "edited question" {
+		t.Fatalf("user content = %q, want edited question", got)
+	}
+	if got := reloaded[1].Content; got != "regenerated answer" {
+		t.Fatalf("assistant content = %q, want regenerated answer", got)
+	}
+	if reloaded[0].EditedAfterGeneration {
+		t.Fatalf("user EditedAfterGeneration = true, want false")
+	}
+	if reloaded[1].StaleAfterUserEdit {
+		t.Fatalf("assistant StaleAfterUserEdit = true, want false")
+	}
+	if m.messageBrowse.editMode {
+		t.Fatalf("editMode = true, want false")
+	}
+	if m.messageBrowse.pendingConfirm.kind != confirmNone {
+		t.Fatalf("pendingConfirm = %v, want confirmNone", m.messageBrowse.pendingConfirm.kind)
+	}
+	if len(provider.received) != 2 {
+		t.Fatalf("provider received %d messages, want 2", len(provider.received))
+	}
+	if provider.received[0].Role != "system" || provider.received[0].Content != "system prompt" {
+		t.Fatalf("provider first message = %+v, want system prompt", provider.received[0])
+	}
+	if provider.received[1].Role != "user" || provider.received[1].Content != "edited question" {
+		t.Fatalf("provider second message = %+v, want edited question", provider.received[1])
+	}
+}
+
+func TestStreamErrorPersistsAsAssistantMessageBrowsableAndDeletable(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	const name = "conv"
+	userID, err := store.AppendMessage(name, chat.Message{
+		Seq:     1,
+		Role:    "user",
+		Content: "q1",
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	m.tabs[0].streaming = true
+
+	next, _ := m.Update(streamErrMsg{
+		TabIdx: 0,
+		Err:    errors.New("stream: rate limited"),
+	})
+	m = next.(Model)
+
+	reloaded := mustLoadActiveTimeline(t, store, name)
+	if len(reloaded) != 2 {
+		t.Fatalf("active timeline len = %d, want 2", len(reloaded))
+	}
+	if got := reloaded[1].Role; got != "assistant" {
+		t.Fatalf("stored error role = %q, want assistant", got)
+	}
+	if got := reloaded[1].Seq; got != reloaded[0].Seq {
+		t.Fatalf("stored error seq = %d, want %d", got, reloaded[0].Seq)
+	}
+	if got := reloaded[1].Content; got != "Error: stream: rate limited" {
+		t.Fatalf("stored error content = %q", got)
+	}
+
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	if len(m.messageBrowse.turns) != 1 {
+		t.Fatalf("turn count = %d, want 1", len(m.messageBrowse.turns))
+	}
+	turn := m.messageBrowse.turns[0]
+	if got := turn.User.ID; got != userID {
+		t.Fatalf("turn user ID = %d, want %d", got, userID)
+	}
+	if len(turn.AssistantVersions) != 1 {
+		t.Fatalf("assistant version count = %d, want 1", len(turn.AssistantVersions))
+	}
+	if got := turn.AssistantVersions[0].Content; got != "Error: stream: rate limited" {
+		t.Fatalf("browser assistant content = %q", got)
+	}
+}
+
+func TestMessageBrowse_RegenerateCurrentPreviewVersionUsesStoredSnapshot(t *testing.T) {
+	store := newBrowserTestStore(t)
+	tab, err := newTabSession(config.DefaultConfig(), &stubProvider{model: "live-model"}, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+
+	m := Model{
+		cfg:       config.DefaultConfig(),
+		store:     store,
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     80,
+		height:    24,
+		providerFactory: func(providerType, baseURL, apiKey, model string) chat.Provider {
+			return &streamingStubProvider{
+				stubProvider: stubProvider{model: model},
+				response:     "rewritten by snapshot",
+			}
+		},
+		modelRegistry: config.ModelRegistry{
+			Providers: []config.ProviderEntry{
+				{
+					Name:     "anthropic-direct",
+					Provider: "anthropic",
+					BaseURL:  "https://api.anthropic.com",
+					APIKey:   "k",
+					Models:   []config.ModelEntry{{Name: "sonnet", Model: "claude-sonnet-4"}},
+				},
+			},
+		},
+	}
+
+	const name = "conv"
+	seedConversationLegacy(t, store, name, []chat.Message{
+		{Seq: 1, Role: "user", Content: "q1"},
+		{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "anthropic-direct", SnapshotModel: "claude-sonnet-4", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
+	})
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	reloaded := mustLoadActiveTimeline(t, store, name)
+	if got := reloaded[1].Content; got != "rewritten by snapshot" {
+		t.Fatalf("assistant content = %q, want rewritten by snapshot", got)
+	}
+}
+
+func TestMessageBrowse_EditRegenerateAllVersionsRewritesEachVersionOrError(t *testing.T) {
+	store := newBrowserTestStore(t)
+	cfg := config.DefaultConfig()
+	tab, err := newTabSession(cfg, &stubProvider{model: "unused-live-model"}, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+
+	m := Model{
+		cfg:       cfg,
+		store:     store,
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     80,
+		height:    24,
+		providerFactory: func(providerType, baseURL, apiKey, model string) chat.Provider {
+			switch model {
+			case "claude-sonnet-4":
+				return &streamingStubProvider{
+					stubProvider: stubProvider{model: model},
+					response:     "claude rewrite",
+				}
+			case "gemini-3-flash-preview":
+				return &erroringProvider{model: model, err: errors.New("429")}
+			default:
+				return &streamingStubProvider{
+					stubProvider: stubProvider{model: model},
+					response:     "fallback rewrite",
+				}
+			}
+		},
+		modelRegistry: config.ModelRegistry{
+			Providers: []config.ProviderEntry{
+				{
+					Name:     "anthropic-direct",
+					Provider: "anthropic",
+					BaseURL:  "https://api.anthropic.com",
+					APIKey:   "k1",
+					Models:   []config.ModelEntry{{Name: "sonnet", Model: "claude-sonnet-4"}},
+				},
+				{
+					Name:     "gateway",
+					Provider: "openai-compatible",
+					BaseURL:  "https://example.test/v1",
+					APIKey:   "k2",
+					Models:   []config.ModelEntry{{Name: "flash", Model: "gemini-3-flash-preview"}},
+				},
+			},
+		},
+	}
+
+	const name = "conv"
+	seedConversationLegacy(t, store, name, []chat.Message{
+		{Seq: 1, Role: "user", Content: "old question"},
+		{Seq: 1, Role: "assistant", Content: "old a", VersionNumber: 1, SnapshotProvider: "anthropic-direct", SnapshotModel: "claude-sonnet-4", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
+		{Seq: 1, Role: "assistant", Content: "old b", VersionNumber: 2, SnapshotProvider: "gateway", SnapshotModel: "gemini-3-flash-preview", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
+	})
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m.messageBrowse.editBuffer = "edited question"
+	m.messageBrowse.editDirty = true
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+	m.messageBrowse.pendingConfirm.cursor = 0
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+
+	reloaded, err := store.LoadBrowseMessages(name)
+	if err != nil {
+		t.Fatalf("LoadBrowseMessages() error = %v", err)
+	}
+	if got := reloaded[0].Content; got != "edited question" {
+		t.Fatalf("user content = %q, want edited question", got)
+	}
+	if got := reloaded[1].Content; got != "claude rewrite" {
+		t.Fatalf("assistant v1 content = %q, want claude rewrite", got)
+	}
+	if got := reloaded[2].Content; got != "Error: 429" {
+		t.Fatalf("assistant v2 content = %q, want Error: 429", got)
+	}
+}
+
+func TestMessageBrowse_GCreatesAssistantVersionFromSelectedRegistryModel(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+	m.providerFactory = func(providerType, baseURL, apiKey, model string) chat.Provider {
+		return &streamingStubProvider{
+			stubProvider: stubProvider{model: model},
+			response:     "new version from registry",
+		}
+	}
+	m.modelRegistry = config.ModelRegistry{
+		Providers: []config.ProviderEntry{
+			{
+				Name:     "gateway",
+				Provider: "openai-compatible",
+				BaseURL:  "https://example.test/v1",
+				APIKey:   "k",
+				Models: []config.ModelEntry{
+					{Name: "flash", Model: "gemini-3-flash-preview"},
+				},
+			},
+		},
+	}
+	_, err := store.AppendMessage("conv", chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	assistantID, err := store.AppendMessage("conv", chat.Message{
+		Seq:                1,
+		Role:               "assistant",
+		Content:            "v1",
+		VersionNumber:      1,
+		SnapshotProvider:   "gateway",
+		SnapshotModel:      "gemini-3-flash-preview",
+		SnapshotRoleName:   "writer",
+		SnapshotRolePrompt: "be concise",
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage(assistant) error = %v", err)
+	}
+	if err := store.InitVersionGroup(assistantID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	m.tabs[0].autoSaveName = "conv"
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, "conv"))
+	m.tabs[0].history.SetSystemPrompt("be concise")
+	m.activeRole = "writer"
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if m.mode != modeModelSelector {
+		t.Fatalf("mode = %v, want modeModelSelector", m.mode)
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+
+	reloaded, err := store.LoadBrowseMessages("conv")
+	if err != nil {
+		t.Fatalf("LoadBrowseMessages() error = %v", err)
+	}
+	if len(reloaded) != 3 {
+		t.Fatalf("browse len = %d, want 3", len(reloaded))
+	}
+	if got := reloaded[2].Content; got != "new version from registry" {
+		t.Fatalf("new version content = %q, want new version from registry", got)
+	}
+	if got := reloaded[2].SnapshotProvider; got != "gateway" {
+		t.Fatalf("SnapshotProvider = %q, want gateway", got)
+	}
+	if got := reloaded[2].SnapshotModel; got != "gemini-3-flash-preview" {
+		t.Fatalf("SnapshotModel = %q, want gemini-3-flash-preview", got)
+	}
+}
+
+func TestMessageBrowse_RDisabledForLegacyVersion(t *testing.T) {
+	m := newVersionedBrowseModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.turns[0].AssistantVersions[0].SnapshotProvider = ""
+	m.messageBrowse.turns[0].AssistantVersions[0].SnapshotModel = ""
+	m.messageBrowse.turns[0].AssistantVersions[0].SnapshotRolePrompt = ""
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	if got := m.statusMsg; got != "Legacy version cannot be regenerated" {
+		t.Fatalf("statusMsg = %q, want legacy warning", got)
 	}
 }

@@ -2,16 +2,19 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/muesli/reflow/wrap"
 	"github.com/termchat/termchat/internal/chat"
+	"github.com/termchat/termchat/internal/config"
 )
 
 type clipboardResultMsg struct{ Err error }
@@ -50,12 +53,14 @@ func (m *Model) currentBrowseTurn() *browseTurn {
 	return &m.messageBrowse.turns[m.messageBrowse.turnIdx]
 }
 
-// buildBrowserState constructs messageBrowse.turns from active timeline.
-// Groups messages into user-assistant pairs, loads all versions for each assistant message.
+// buildBrowserState constructs browser turns from persisted rows, including
+// soft-deleted user/assistant rows so half-empty turns can still render.
 func (m *Model) buildBrowserState() error {
 	tab := &m.tabs[m.activeTab]
-	msgs := tab.history.Messages()
-
+	msgs, err := m.store.LoadBrowseMessages(tab.autoSaveName)
+	if err != nil {
+		return err
+	}
 	if len(msgs) == 0 {
 		return fmt.Errorf("no messages to browse")
 	}
@@ -63,56 +68,70 @@ func (m *Model) buildBrowserState() error {
 	m.messageBrowse.turns = nil
 	m.messageBrowse.compareCardScrolls = make(map[int]int)
 
-	for i := 0; i < len(msgs); i++ {
-		if msgs[i].Role != "user" {
-			continue
+	appendTurn := func(turn browseTurn) {
+		if turn.User.ID == 0 && len(turn.AssistantVersions) == 0 {
+			return
+		}
+		if turn.User.Deleted && len(turn.AssistantVersions) == 0 {
+			return
 		}
 
-		userMsg := msgs[i]
-
-		// Find assistant message(s) after this user message
-		var assistantVersions []chat.Message
-		if i+1 < len(msgs) && msgs[i+1].Role == "assistant" {
-			anchorID := msgs[i+1].ID
-			versions, err := m.store.ListVersions(tab.autoSaveName, anchorID)
-			if err != nil {
-				return err
-			}
-			assistantVersions = versions
-		}
-
-		// Find which version is active
 		activeIdx := 0
-		if len(assistantVersions) > 0 {
-			for idx, v := range assistantVersions {
-				// The active timeline message ID matches one of the versions
-				if i+1 < len(msgs) && v.ID == msgs[i+1].ID {
-					activeIdx = idx
-					break
-				}
+		for idx := range turn.AssistantVersions {
+			turn.AssistantVersions[idx].TotalVersions = len(turn.AssistantVersions)
+			if turn.AssistantVersions[idx].IsActiveVersion {
+				activeIdx = idx
 			}
 		}
-
-		m.messageBrowse.turns = append(m.messageBrowse.turns, browseTurn{
-			User:              userMsg,
-			AssistantVersions: assistantVersions,
-			ActiveVersion:     activeIdx,
-			PreviewVersion:    activeIdx,
-		})
-
-		// Skip the assistant message we just processed
-		if len(assistantVersions) > 0 {
-			i++
+		if activeIdx >= len(turn.AssistantVersions) {
+			activeIdx = 0
 		}
+		turn.ActiveVersion = activeIdx
+		turn.PreviewVersion = activeIdx
+		m.messageBrowse.turns = append(m.messageBrowse.turns, turn)
 	}
 
-	// Start at last turn
+	var current browseTurn
+	var hasCurrent bool
+	for _, msg := range msgs {
+		switch msg.Role {
+		case "user":
+			if hasCurrent {
+				appendTurn(current)
+			}
+			current = browseTurn{
+				User:    msg,
+				TurnSeq: msg.Seq,
+			}
+			hasCurrent = true
+		case "assistant":
+			if !hasCurrent {
+				current = browseTurn{TurnSeq: msg.Seq}
+				hasCurrent = true
+			}
+			if !msg.Deleted {
+				current.AssistantVersions = append(current.AssistantVersions, msg)
+			}
+		}
+	}
+	if hasCurrent {
+		appendTurn(current)
+	}
+
+	if len(m.messageBrowse.turns) == 0 {
+		m.messageBrowse.turnIdx = 0
+		m.messageBrowse.mode = browseModeMessage
+		m.messageBrowse.leftScroll = 0
+		m.messageBrowse.rightScroll = 0
+		m.messageBrowse.compareCardIdx = 0
+		return nil
+	}
+
 	m.messageBrowse.turnIdx = len(m.messageBrowse.turns) - 1
 	m.messageBrowse.mode = browseModeMessage
 	m.messageBrowse.leftScroll = 0
 	m.messageBrowse.rightScroll = 0
-	m.messageBrowse.compareCardIdx = 0
-
+	m.messageBrowse.compareCardIdx = m.currentBrowseTurn().PreviewVersion
 	return nil
 }
 
@@ -134,6 +153,52 @@ func (m *Model) moveCompareCard(delta int) {
 	m.currentBrowseTurn().PreviewVersion = next
 }
 
+func (m *Model) moveBrowseTurn(delta int) {
+	next := m.messageBrowse.turnIdx + delta
+	if next < 0 || next >= len(m.messageBrowse.turns) {
+		return
+	}
+	m.messageBrowse.turnIdx = next
+	m.messageBrowse.leftScroll = 0
+	m.messageBrowse.rightScroll = 0
+	m.messageBrowse.compareCardIdx = m.currentBrowseTurn().PreviewVersion
+}
+
+func (m *Model) scrollCompareCard(delta int) {
+	if m.messageBrowse.compareCardScrolls == nil {
+		m.messageBrowse.compareCardScrolls = make(map[int]int)
+	}
+	idx := m.messageBrowse.compareCardIdx
+	next := m.messageBrowse.compareCardScrolls[idx] + delta
+	if next < 0 {
+		next = 0
+	}
+	m.messageBrowse.compareCardScrolls[idx] = next
+}
+
+func (m *Model) focusCompareCardAt(x int) {
+	turn := m.currentBrowseTurn()
+	if len(turn.AssistantVersions) == 0 {
+		return
+	}
+
+	cardWidth := (m.width - 4) / len(turn.AssistantVersions)
+	if cardWidth < 20 {
+		cardWidth = 20
+	}
+
+	idx := x / cardWidth
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(turn.AssistantVersions) {
+		idx = len(turn.AssistantVersions) - 1
+	}
+
+	m.messageBrowse.compareCardIdx = idx
+	turn.PreviewVersion = idx
+}
+
 func (m Model) confirmOrApplyPreview() (Model, tea.Cmd) {
 	turn := m.currentBrowseTurn()
 
@@ -147,9 +212,7 @@ func (m Model) confirmOrApplyPreview() (Model, tea.Cmd) {
 
 	if !hasLaterTurns {
 		// Apply immediately if no later turns
-		turn.ActiveVersion = turn.PreviewVersion
-		m.statusMsg = "Version applied"
-		return m, nil
+		return m.applyPreviewWithoutTruncate()
 	}
 
 	// Open confirmation chooser
@@ -160,20 +223,78 @@ func (m Model) confirmOrApplyPreview() (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) rebuildBrowserStateAtSeq(turnSeq int) error {
+	if err := m.reloadActiveTimeline(m.activeTab); err != nil && err.Error() != "conversation not found" {
+		return err
+	}
+	if err := m.buildBrowserState(); err != nil && err.Error() != "no messages to browse" {
+		return err
+	}
+	if len(m.messageBrowse.turns) == 0 {
+		m.messageBrowse.turnIdx = 0
+		m.messageBrowse.compareCardIdx = 0
+		return nil
+	}
+
+	targetIdx := len(m.messageBrowse.turns) - 1
+	for idx, turn := range m.messageBrowse.turns {
+		if turn.TurnSeq >= turnSeq {
+			targetIdx = idx
+			if turn.TurnSeq == turnSeq {
+				break
+			}
+		}
+	}
+	m.messageBrowse.turnIdx = targetIdx
+	m.messageBrowse.compareCardIdx = m.messageBrowse.turns[targetIdx].PreviewVersion
+	return nil
+}
+
+func (m Model) applyPreviewWithoutTruncate() (Model, tea.Cmd) {
+	turn := m.currentBrowseTurn()
+	previewMsg := turn.AssistantVersions[turn.PreviewVersion]
+
+	if err := m.store.SetActiveVersion(m.tabs[m.activeTab].autoSaveName, previewMsg.VersionGroupID, previewMsg.VersionNumber); err != nil {
+		m.statusMsg = "Failed to apply: " + err.Error()
+		return m, nil
+	}
+	if err := m.rebuildBrowserStateAtSeq(turn.TurnSeq); err != nil {
+		m.statusMsg = "Failed to reload: " + err.Error()
+		return m, nil
+	}
+
+	m.statusMsg = "Version applied"
+	return m, nil
+}
+
 func (m Model) applyBrowseConfirmation() (Model, tea.Cmd) {
 	switch m.messageBrowse.pendingConfirm.kind {
 	case confirmApplyPreview:
-		// TODO: implement apply/branch logic based on cursor
-		// For now, just apply
 		turn := m.currentBrowseTurn()
-		turn.ActiveVersion = turn.PreviewVersion
+		previewMsg := turn.AssistantVersions[turn.PreviewVersion]
+		if err := m.store.SetActiveVersion(m.tabs[m.activeTab].autoSaveName, previewMsg.VersionGroupID, previewMsg.VersionNumber); err != nil {
+			m.statusMsg = "Failed to apply: " + err.Error()
+			m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+			return m, nil
+		}
+		if m.messageBrowse.pendingConfirm.cursor == 1 {
+			if err := m.store.TruncateAfterSeq(m.tabs[m.activeTab].autoSaveName, turn.User.Seq); err != nil {
+				m.statusMsg = "Failed to truncate: " + err.Error()
+				m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+				return m, nil
+			}
+		}
+		if err := m.rebuildBrowserStateAtSeq(turn.TurnSeq); err != nil {
+			m.statusMsg = "Failed to reload: " + err.Error()
+			m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+			return m, nil
+		}
 		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
 		m.statusMsg = "Version applied"
 		return m, nil
 	case confirmEditRegenerate:
 		selected := m.messageBrowse.pendingConfirm.cursor
 		turn := m.currentBrowseTurn()
-		activeAssistant := turn.AssistantVersions[turn.ActiveVersion]
 
 		switch selected {
 		case 0: // Regenerate
@@ -185,40 +306,27 @@ func (m Model) applyBrowseConfirmation() (Model, tea.Cmd) {
 				m.messageBrowse.editMode = false
 				return m, nil
 			}
-			if err := m.store.MarkTurnEdited(turn.User.ID, activeAssistant.ID); err != nil {
-				m.statusMsg = "Mark stale failed: " + err.Error()
-				m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
-				m.messageBrowse.editMode = false
-				return m, nil
+			for _, assistant := range turn.AssistantVersions {
+				if err := m.store.MarkTurnEdited(turn.User.ID, assistant.ID); err != nil {
+					m.statusMsg = "Mark stale failed: " + err.Error()
+					m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+					m.messageBrowse.editMode = false
+					return m, nil
+				}
 			}
 			return m.reloadBrowseTurnState()
 		}
+	case confirmDeleteSelection:
+		return m.applyDeleteSelection()
 	}
 	return m, nil
 }
 
 func (m Model) reloadBrowseTurnState() (Model, tea.Cmd) {
-	turn := m.currentBrowseTurn()
-
-	// Reload the user message from storage
-	tab := &m.tabs[m.activeTab]
-	msgs, err := m.store.LoadActiveTimeline(tab.autoSaveName)
-	if err != nil {
+	turnSeq := m.currentBrowseTurn().TurnSeq
+	if err := m.rebuildBrowserStateAtSeq(turnSeq); err != nil {
 		m.statusMsg = "Reload failed: " + err.Error()
 		return m, nil
-	}
-
-	// Find and update the current turn's user message
-	for _, msg := range msgs {
-		if msg.ID == turn.User.ID {
-			turn.User = msg
-		}
-		// Update assistant versions
-		for i, av := range turn.AssistantVersions {
-			if msg.ID == av.ID {
-				turn.AssistantVersions[i] = msg
-			}
-		}
 	}
 
 	m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
@@ -227,12 +335,366 @@ func (m Model) reloadBrowseTurnState() (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) buildTurnRegenerationMessages(turn browseTurn, userContent string, rolePrompt string) []chat.Message {
+	tab := &m.tabs[m.activeTab]
+	apiMessages := make([]chat.Message, 0, turn.User.Seq+1)
+	if rolePrompt != "" {
+		apiMessages = append(apiMessages, chat.Message{Role: "system", Content: rolePrompt})
+	}
+
+	foundCurrentUser := false
+	for _, msg := range tab.history.Messages() {
+		if msg.Seq < turn.User.Seq {
+			apiMessages = append(apiMessages, chat.Message{
+				Role:    msg.Role,
+				Content: msg.Content,
+				Images:  msg.Images,
+			})
+			continue
+		}
+		if msg.Seq == turn.User.Seq && msg.Role == "user" {
+			apiMessages = append(apiMessages, chat.Message{
+				Role:    "user",
+				Content: userContent,
+				Images:  msg.Images,
+			})
+			foundCurrentUser = true
+		}
+		break
+	}
+
+	if !foundCurrentUser {
+		apiMessages = append(apiMessages, chat.Message{Role: "user", Content: userContent})
+	}
+
+	return apiMessages
+}
+
+func collectAssistantResponseOrError(chunks <-chan chat.StreamChunk, errs <-chan error) string {
+	var resp strings.Builder
+	for chunks != nil || errs != nil {
+		select {
+		case chunk, ok := <-chunks:
+			if !ok {
+				chunks = nil
+				continue
+			}
+			resp.WriteString(chunk.Content)
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			if err != nil {
+				return "Error: " + err.Error()
+			}
+		}
+	}
+	return resp.String()
+}
+
+func (m *Model) lookupProviderConfig(name string) (config.ProviderEntry, bool) {
+	for _, entry := range m.modelRegistry.Providers {
+		if entry.Name == name {
+			return entry, true
+		}
+	}
+	return config.ProviderEntry{}, false
+}
+
+func (m *Model) providerFromAssistantSnapshot(msg chat.Message) (chat.Provider, error) {
+	entry, ok := m.lookupProviderConfig(msg.SnapshotProvider)
+	if !ok {
+		return nil, fmt.Errorf("snapshot provider %q not found", msg.SnapshotProvider)
+	}
+	return m.newProviderClient(entry.Provider, entry.BaseURL, entry.APIKey, msg.SnapshotModel), nil
+}
+
+func (m Model) regenerateAssistantVersionContent(turn browseTurn, target chat.Message, editedContent string) (string, error) {
+	client, err := m.providerFromAssistantSnapshot(target)
+	if err != nil {
+		return "", err
+	}
+	apiMessages := m.buildTurnRegenerationMessages(turn, editedContent, target.SnapshotRolePrompt)
+	chunks, errs := client.SendStreamChan(
+		context.Background(),
+		apiMessages,
+		m.cfg.Parameters.Temperature,
+		m.cfg.Parameters.MaxTokens,
+		m.cfg.Parameters.ReasoningEffort,
+		m.cfg.Parameters.BudgetTokens,
+	)
+	if chunks == nil || errs == nil {
+		return "", fmt.Errorf("provider returned no stream")
+	}
+	return collectAssistantResponseOrError(chunks, errs), nil
+}
+
+func (m Model) regeneratePreviewVersion() (Model, tea.Cmd) {
+	turn := m.currentBrowseTurn()
+	if len(turn.AssistantVersions) == 0 {
+		return m, nil
+	}
+	target := turn.AssistantVersions[turn.PreviewVersion]
+	if !target.HasGenerationSnapshot() {
+		m.statusMsg = "Legacy version cannot be regenerated"
+		return m, nil
+	}
+
+	content, err := m.regenerateAssistantVersionContent(*turn, target, turn.User.Content)
+	if err != nil {
+		m.statusMsg = "Regenerate failed: " + err.Error()
+		return m, nil
+	}
+	if err := m.store.UpdateMessageContent(target.ID, content); err != nil {
+		m.statusMsg = "Update failed: " + err.Error()
+		return m, nil
+	}
+	if err := m.rebuildBrowserStateAtSeq(turn.TurnSeq); err != nil {
+		m.statusMsg = "Reload failed: " + err.Error()
+		return m, nil
+	}
+	m.statusMsg = "Version regenerated"
+	return m, nil
+}
+
+func (m Model) appendAssistantVersionFromSelection(provider config.ProviderEntry, model config.ModelEntry) (Model, tea.Cmd) {
+	turn := m.currentBrowseTurn()
+	client := m.newProviderClient(provider.Provider, provider.BaseURL, provider.APIKey, model.Model)
+	rolePrompt := m.tabs[m.activeTab].history.SystemPrompt()
+	roleName := m.activeRole
+
+	apiMessages := m.buildTurnRegenerationMessages(*turn, turn.User.Content, rolePrompt)
+	chunks, errs := client.SendStreamChan(
+		context.Background(),
+		apiMessages,
+		m.cfg.Parameters.Temperature,
+		m.cfg.Parameters.MaxTokens,
+		m.cfg.Parameters.ReasoningEffort,
+		m.cfg.Parameters.BudgetTokens,
+	)
+	if chunks == nil || errs == nil {
+		m.statusMsg = "New version failed: provider returned no stream"
+		m.mode = modeMessageBrowse
+		return m, nil
+	}
+
+	newMsg := chat.Message{
+		Seq:                turn.User.Seq,
+		Role:               "assistant",
+		Content:            collectAssistantResponseOrError(chunks, errs),
+		VersionNumber:      len(turn.AssistantVersions) + 1,
+		SnapshotProvider:   provider.Name,
+		SnapshotModel:      model.Model,
+		SnapshotRoleName:   roleName,
+		SnapshotRolePrompt: rolePrompt,
+	}
+
+	if len(turn.AssistantVersions) == 0 {
+		msgID, err := m.store.AppendMessage(m.tabs[m.activeTab].autoSaveName, newMsg)
+		if err != nil {
+			m.statusMsg = "Append version failed: " + err.Error()
+			m.mode = modeMessageBrowse
+			return m, nil
+		}
+		if err := m.store.InitVersionGroup(msgID); err != nil {
+			m.statusMsg = "Init version group failed: " + err.Error()
+			m.mode = modeMessageBrowse
+			return m, nil
+		}
+	} else {
+		anchorID := turn.AssistantVersions[0].ID
+		if _, err := m.store.AppendAssistantVersion(m.tabs[m.activeTab].autoSaveName, anchorID, newMsg); err != nil {
+			m.statusMsg = "Append version failed: " + err.Error()
+			m.mode = modeMessageBrowse
+			return m, nil
+		}
+	}
+
+	if err := m.rebuildBrowserStateAtSeq(turn.TurnSeq); err != nil {
+		m.statusMsg = "Reload failed: " + err.Error()
+		m.mode = modeMessageBrowse
+		return m, nil
+	}
+	m.mode = modeMessageBrowse
+	m.statusMsg = "New version added"
+	return m, nil
+}
+
+func assistantVersionTitle(prefix string, msg chat.Message) string {
+	title := fmt.Sprintf("v%d/%d", msg.VersionNumber, msg.TotalVersions)
+	if prefix != "" {
+		title = prefix + " " + title
+	}
+	if msg.SnapshotProvider != "" || msg.SnapshotModel != "" {
+		title += fmt.Sprintf(" %s / %s", msg.SnapshotProvider, msg.SnapshotModel)
+	}
+	return title
+}
+
+func (m *Model) movePendingConfirm(delta int) {
+	limit := 0
+	switch m.messageBrowse.pendingConfirm.kind {
+	case confirmApplyPreview, confirmEditRegenerate:
+		limit = 2
+	case confirmDeleteSelection:
+		limit = 4
+	}
+	if limit == 0 {
+		return
+	}
+
+	next := m.messageBrowse.pendingConfirm.cursor + delta
+	if next < 0 {
+		next = limit - 1
+	}
+	if next >= limit {
+		next = 0
+	}
+	m.messageBrowse.pendingConfirm.cursor = next
+}
+
+func (m Model) restoreLastDeletedBatch() (Model, tea.Cmd) {
+	if m.messageBrowse.lastDeletedBatchID == 0 {
+		m.statusMsg = "Nothing to undo"
+		return m, nil
+	}
+
+	turnSeq := m.messageBrowse.lastDeletedTurnSeq
+	if err := m.store.RestoreDeletedBatch(m.messageBrowse.lastDeletedBatchID); err != nil {
+		m.statusMsg = "Undo failed: " + err.Error()
+		return m, nil
+	}
+	m.messageBrowse.lastDeletedBatchID = 0
+	m.messageBrowse.lastDeletedTurnSeq = 0
+	if err := m.rebuildBrowserStateAtSeq(turnSeq); err != nil {
+		m.statusMsg = "Undo reload failed: " + err.Error()
+		return m, nil
+	}
+	m.statusMsg = "Deletion undone"
+	return m, nil
+}
+
+func (m Model) openDeleteSelection() (Model, tea.Cmd) {
+	if len(m.messageBrowse.turns) == 0 {
+		return m, nil
+	}
+	m.messageBrowse.pendingConfirm = browseConfirmState{
+		kind:   confirmDeleteSelection,
+		cursor: 0,
+	}
+	return m, nil
+}
+
+func (m Model) applyDeleteSelection() (Model, tea.Cmd) {
+	if len(m.messageBrowse.turns) == 0 {
+		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+		return m, nil
+	}
+
+	turn := m.currentBrowseTurn()
+	var ids []int64
+
+	switch m.messageBrowse.pendingConfirm.cursor {
+	case deleteUserOnly:
+		if !turn.User.Deleted && turn.User.ID != 0 {
+			ids = append(ids, turn.User.ID)
+		}
+	case deleteAssistantOnly:
+		if len(turn.AssistantVersions) > 0 {
+			ids = append(ids, turn.AssistantVersions[turn.PreviewVersion].ID)
+		}
+	case deleteBothSides:
+		if !turn.User.Deleted && turn.User.ID != 0 {
+			ids = append(ids, turn.User.ID)
+		}
+		if len(turn.AssistantVersions) > 0 {
+			ids = append(ids, turn.AssistantVersions[turn.PreviewVersion].ID)
+		}
+	case deleteCancel:
+		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+		return m, nil
+	}
+
+	if len(ids) == 0 {
+		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+		m.statusMsg = "Nothing to delete"
+		return m, nil
+	}
+
+	batchID, err := m.store.SoftDeleteMessages(ids...)
+	if err != nil {
+		m.statusMsg = "Delete failed: " + err.Error()
+		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+		return m, nil
+	}
+
+	m.messageBrowse.lastDeletedBatchID = batchID
+	m.messageBrowse.lastDeletedTurnSeq = turn.TurnSeq
+	m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+	if err := m.rebuildBrowserStateAtSeq(turn.TurnSeq); err != nil {
+		m.statusMsg = "Reload failed: " + err.Error()
+		return m, nil
+	}
+	m.statusMsg = "Marked deleted"
+	return m, nil
+}
+
 func (m Model) confirmOrRegenerateEditedTurn() (Model, tea.Cmd) {
-	// TODO: implement regenerate logic
-	// For now, just clear edit mode
+	turn := m.currentBrowseTurn()
+	if len(turn.AssistantVersions) == 0 {
+		m.statusMsg = "Regenerate failed: no assistant reply to replace"
+		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+		m.messageBrowse.editMode = false
+		return m, nil
+	}
+
+	editedContent := m.messageBrowse.editBuffer
+	if err := m.store.UpdateMessageContent(turn.User.ID, editedContent); err != nil {
+		m.statusMsg = "Update failed: " + err.Error()
+		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+		m.messageBrowse.editMode = false
+		return m, nil
+	}
+
+	for _, assistant := range turn.AssistantVersions {
+		if !assistant.HasGenerationSnapshot() {
+			m.statusMsg = "Turn contains legacy versions that cannot be regenerated"
+			m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+			m.messageBrowse.editMode = false
+			return m, nil
+		}
+
+		content, err := m.regenerateAssistantVersionContent(*turn, assistant, editedContent)
+		if err != nil {
+			m.statusMsg = "Regenerate failed: " + err.Error()
+			m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+			m.messageBrowse.editMode = false
+			return m, nil
+		}
+		if err := m.store.UpdateMessageContent(assistant.ID, content); err != nil {
+			m.statusMsg = "Update failed: " + err.Error()
+			m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+			m.messageBrowse.editMode = false
+			return m, nil
+		}
+		if err := m.store.ClearTurnEdited(turn.User.ID, assistant.ID); err != nil {
+			m.statusMsg = "Clear flags failed: " + err.Error()
+			m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+			m.messageBrowse.editMode = false
+			return m, nil
+		}
+	}
+	if err := m.rebuildBrowserStateAtSeq(turn.TurnSeq); err != nil {
+		m.statusMsg = "Reload failed: " + err.Error()
+		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+		m.messageBrowse.editMode = false
+		return m, nil
+	}
+
 	m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
 	m.messageBrowse.editMode = false
-	m.statusMsg = "Regenerate not yet implemented"
+	m.statusMsg = "Turn regenerated"
 	return m, nil
 }
 
@@ -244,6 +706,22 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	tab := &m.tabs[m.activeTab]
 	msgs := tab.history.Messages()
+
+	if m.messageBrowse.pendingConfirm.kind != confirmNone {
+		switch msg.String() {
+		case "esc":
+			m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+			return m, nil
+		case "up", "k", "left", "h":
+			m.movePendingConfirm(-1)
+			return m, nil
+		case "down", "j", "right", "l":
+			m.movePendingConfirm(1)
+			return m, nil
+		case "enter":
+			return m.applyBrowseConfirmation()
+		}
+	}
 
 	switch msg.String() {
 	case "esc":
@@ -260,13 +738,17 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "up", "k":
-		if m.browseCursor > 0 {
-			m.browseCursor--
+		if m.messageBrowse.mode == browseModeCompare {
+			m.scrollCompareCard(-1)
+		} else {
+			m.moveBrowseTurn(-1)
 		}
 
 	case "down", "j":
-		if m.browseCursor < len(msgs)-1 {
-			m.browseCursor++
+		if m.messageBrowse.mode == browseModeCompare {
+			m.scrollCompareCard(1)
+		} else {
+			m.moveBrowseTurn(1)
 		}
 
 	case "left", "h":
@@ -290,17 +772,26 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case "e":
-		if len(m.messageBrowse.turns) > 0 {
+		if len(m.messageBrowse.turns) > 0 && !m.currentBrowseTurn().User.Deleted {
 			turn := m.currentBrowseTurn()
 			m.messageBrowse.editMode = true
 			m.messageBrowse.editBuffer = turn.User.Content
 			m.messageBrowse.editDirty = false
 		}
 
-	case "enter":
-		if m.messageBrowse.pendingConfirm.kind != confirmNone {
-			return m.applyBrowseConfirmation()
+	case "g":
+		if len(m.messageBrowse.turns) > 0 {
+			m.modelSel = newModelSelectorState(m.modelRegistry, modelSelectorPickForNewVersion)
+			m.mode = modeModelSelector
+			return m, nil
 		}
+
+	case "r":
+		if len(m.messageBrowse.turns) > 0 {
+			return m.regeneratePreviewVersion()
+		}
+
+	case "enter":
 		// If in edit mode, open confirmation dialog
 		if m.messageBrowse.editMode {
 			m.messageBrowse.pendingConfirm = browseConfirmState{
@@ -331,7 +822,10 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "d":
-		return m.deleteCurrentBrowseSelection()
+		return m.openDeleteSelection()
+
+	case "u":
+		return m.restoreLastDeletedBatch()
 
 	case "b":
 		return m.branchFromCurrentBrowseTurn()
@@ -348,6 +842,9 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) viewMessageBrowse() string {
 	tabBar := (&m).renderTabBar()
 	tab := m.activeTabSession()
+	help := renderBrowseHelp(m.messageBrowse.mode, m.width, m.theme)
+	confirm := m.renderBrowseConfirm()
+	statusBar := m.renderStatusBar()
 
 	// If no turns, show empty state
 	if len(m.messageBrowse.turns) == 0 {
@@ -355,7 +852,7 @@ func (m Model) viewMessageBrowse() string {
 		b.WriteString(m.theme.ConfigTitleStyle().Render("Browse Messages") + "\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  No messages.") + "\n\n")
 		b.WriteString(m.theme.ConfigHelpStyle().Render("  Esc: back") + "\n")
-		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
+		return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+statusBar)
 	}
 
 	// Get current turn
@@ -364,6 +861,10 @@ func (m Model) viewMessageBrowse() string {
 		turnIdx = len(m.messageBrowse.turns) - 1
 	}
 	turn := m.messageBrowse.turns[turnIdx]
+	bodyHeight := m.height - lipgloss.Height(tabBar) - lipgloss.Height(help) - lipgloss.Height(confirm) - lipgloss.Height(statusBar)
+	if bodyHeight < 4 {
+		bodyHeight = 4
+	}
 
 	var body string
 
@@ -389,14 +890,14 @@ func (m Model) viewMessageBrowse() string {
 			if err != nil {
 				content = msg.Content
 			} else {
-				content = cleanGlamourOutput(rendered)
+				content = xansi.Strip(cleanGlamourOutput(rendered))
 			}
 
-			title := fmt.Sprintf("v%d/%d", msg.VersionNumber, msg.TotalVersions)
+			title := assistantVersionTitle("", msg)
 			if isSelected {
 				title = "► " + title
 			}
-			card := renderBrowsePane(title, content, scroll, cardWidth, m.height, m.theme)
+			card := renderBrowsePane(title, content, scroll, cardWidth, bodyHeight, m.theme)
 			cards = append(cards, card)
 		}
 		body = lipgloss.JoinHorizontal(lipgloss.Top, cards...)
@@ -408,7 +909,11 @@ func (m Model) viewMessageBrowse() string {
 		}
 
 		// Render left pane (User)
-		left := renderBrowsePane("User", turn.User.Content, m.messageBrowse.leftScroll, paneWidth, m.height, m.theme)
+		leftContent := turn.User.Content
+		if turn.User.Deleted {
+			leftContent = ""
+		}
+		left := renderBrowsePane("User", leftContent, m.messageBrowse.leftScroll, paneWidth, bodyHeight, m.theme)
 
 		// Render right pane (Assistant with version)
 		var right string
@@ -418,7 +923,7 @@ func (m Model) viewMessageBrowse() string {
 				previewIdx = 0
 			}
 			rightMsg := turn.AssistantVersions[previewIdx]
-			rightTitle := fmt.Sprintf("Assistant v%d/%d", rightMsg.VersionNumber, rightMsg.TotalVersions)
+			rightTitle := assistantVersionTitle("Assistant", rightMsg)
 
 			// Render assistant content with markdown
 			var content string
@@ -426,146 +931,196 @@ func (m Model) viewMessageBrowse() string {
 			if err != nil {
 				content = rightMsg.Content
 			} else {
-				content = cleanGlamourOutput(rendered)
+				content = xansi.Strip(cleanGlamourOutput(rendered))
 			}
-			right = renderBrowsePane(rightTitle, content, m.messageBrowse.rightScroll, paneWidth, m.height, m.theme)
+			right = renderBrowsePane(rightTitle, content, m.messageBrowse.rightScroll, paneWidth, bodyHeight, m.theme)
 		} else {
-			right = renderBrowsePane("Assistant", "(no versions)", 0, paneWidth, m.height, m.theme)
+			right = renderBrowsePane("Assistant", "", 0, paneWidth, bodyHeight, m.theme)
 		}
 
 		// Join panes horizontally
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 
-	// Footer help
-	help := m.theme.ConfigHelpStyle().Render(
-		"↑↓: turn  ←→: version  e: edit  g: new version  v: compare  Enter: apply/confirm  Esc: back",
-	)
-
-	return lipgloss.JoinVertical(lipgloss.Left, tabBar, body, help, m.renderStatusBar())
+	parts := []string{tabBar, body}
+	if confirm != "" {
+		parts = append(parts, confirm)
+	}
+	parts = append(parts, help, statusBar)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 // renderBrowsePane renders a single pane with title, content, and scroll handling
-func renderBrowsePane(title, content string, scroll, width, totalHeight int, theme Theme) string {
-	// Calculate available height for content
-	// totalHeight - tabbar(1) - help(1) - status(1) - padding(3)
-	availableHeight := totalHeight - 6
-	if availableHeight < 5 {
-		availableHeight = 5
+func renderBrowsePane(title, content string, scroll, width, height int, theme Theme) string {
+	if width < 1 {
+		width = 1
+	}
+	if height < 3 {
+		height = 3
 	}
 
-	// Split content into lines
-	contentLines := strings.Split(content, "\n")
+	titleBar := " " + title + " "
+	if xansi.StringWidth(titleBar) > width {
+		titleBar = xansi.TruncateWc(titleBar, width, "")
+	}
+	if fill := width - xansi.StringWidth(titleBar); fill > 0 {
+		titleBar += strings.Repeat("─", fill)
+	}
 
-	// Apply scroll offset
+	content = xansi.Strip(content)
+	contentLines := strings.Split(content, "\n")
+	var wrappedLines []string
+	for _, line := range contentLines {
+		wrapped := wrap.String(line, width)
+		parts := strings.Split(wrapped, "\n")
+		wrappedLines = append(wrappedLines, parts...)
+	}
+	if len(wrappedLines) == 0 {
+		wrappedLines = []string{""}
+	}
+
 	startLine := scroll
-	if startLine >= len(contentLines) {
-		startLine = len(contentLines) - 1
+	if startLine >= len(wrappedLines) {
+		startLine = len(wrappedLines) - 1
 	}
 	if startLine < 0 {
 		startLine = 0
 	}
 
-	endLine := startLine + availableHeight
-	if endLine > len(contentLines) {
-		endLine = len(contentLines)
+	availableContentHeight := height - 3 // title + up/down indicators
+	if availableContentHeight < 1 {
+		availableContentHeight = 1
 	}
 
-	visibleLines := contentLines[startLine:endLine]
-
-	// Wrap each line to fit pane width
-	var wrappedLines []string
-	for _, line := range visibleLines {
-		if utf8.RuneCountInString(line) <= width {
-			wrappedLines = append(wrappedLines, line)
-		} else {
-			// Simple word wrap
-			runes := []rune(line)
-			for len(runes) > 0 {
-				if len(runes) <= width {
-					wrappedLines = append(wrappedLines, string(runes))
-					break
-				}
-				wrappedLines = append(wrappedLines, string(runes[:width]))
-				runes = runes[width:]
-			}
-		}
+	endLine := startLine + availableContentHeight
+	if endLine > len(wrappedLines) {
+		endLine = len(wrappedLines)
 	}
 
-	// Pad lines to consistent width
-	for i, line := range wrappedLines {
-		lineLen := utf8.RuneCountInString(line)
-		if lineLen < width {
-			wrappedLines[i] = line + strings.Repeat(" ", width-lineLen)
-		}
-	}
-
-	// Build pane
 	var b strings.Builder
-
-	// Title bar
-	titleBar := " " + title + " "
-	titleLen := utf8.RuneCountInString(titleBar)
-	if titleLen < width {
-		titleBar += strings.Repeat("─", width-titleLen)
-	}
+	lineStyle := lipgloss.NewStyle().Width(width)
 	b.WriteString(theme.ConfigTitleStyle().Render(titleBar) + "\n")
-
-	// Content
-	b.WriteString(strings.Join(wrappedLines, "\n"))
-
-	// Scroll indicators
+	for _, line := range wrappedLines[startLine:endLine] {
+		b.WriteString(lineStyle.Render(line) + "\n")
+	}
 	if startLine > 0 {
-		b.WriteString("\n" + theme.ConfigHelpStyle().Render("(↑ more…)"))
+		b.WriteString(theme.ConfigHelpStyle().Render(lineStyle.Render("(↑ more…)")) + "\n")
 	}
-	if endLine < len(contentLines) {
-		b.WriteString("\n" + theme.ConfigHelpStyle().Render("(↓ more…)"))
+	if endLine < len(wrappedLines) {
+		b.WriteString(theme.ConfigHelpStyle().Render(lineStyle.Render("(↓ more…)")))
 	}
 
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderBrowseHelp(mode browseMode, width int, theme Theme) string {
+	var items []string
+	if mode == browseModeCompare {
+		items = []string{
+			"↑↓: scroll",
+			"←→: card",
+			"Enter: apply",
+			"d: delete",
+			"u: undo",
+			"b: branch",
+			"v: message",
+			"Esc: back",
+		}
+	} else {
+		items = []string{
+			"↑↓: turn",
+			"←→: version",
+			"Enter: apply",
+			"e: edit",
+			"d: delete",
+			"u: undo",
+			"b: branch",
+			"v: compare",
+			"Esc: back",
+		}
+	}
+
+	lines := packPlainLines(items, width, 2)
+	for i, line := range lines {
+		lines[i] = theme.ConfigHelpStyle().Render(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderBrowseConfirm() string {
+	if m.messageBrowse.pendingConfirm.kind == confirmNone {
+		return ""
+	}
+
+	var title string
+	var options []string
+	switch m.messageBrowse.pendingConfirm.kind {
+	case confirmDeleteSelection:
+		title = "Delete"
+		options = []string{"user", "assistant", "both", "cancel"}
+	case confirmApplyPreview:
+		title = "Apply"
+		options = []string{"keep later turns", "truncate later turns"}
+	case confirmEditRegenerate:
+		title = "Edited User Message"
+		options = []string{"regenerate", "save only"}
+	}
+
+	var rendered []string
+	for idx, option := range options {
+		label := option
+		if idx == m.messageBrowse.pendingConfirm.cursor {
+			label = "[" + option + "]"
+			rendered = append(rendered, m.theme.ConfigTitleStyle().Render(label))
+			continue
+		}
+		rendered = append(rendered, m.theme.ConfigHelpStyle().Render(label))
+	}
+
+	return m.theme.ConfigHelpStyle().Render(title+": ") + strings.Join(rendered, m.theme.ConfigHelpStyle().Render("  "))
+}
+
+func packPlainLines(items []string, width, maxLines int) []string {
+	if len(items) == 0 {
+		return nil
+	}
+
+	if width <= 0 {
+		return []string{strings.Join(items, "  ")}
+	}
+
+	var lines []string
+	current := ""
+	for _, item := range items {
+		candidate := item
+		if current != "" {
+			candidate = current + "  " + item
+		}
+		if current == "" && xansi.StringWidth(item) > width {
+			lines = append(lines, xansi.TruncateWc(item, width, ""))
+			continue
+		}
+		if xansi.StringWidth(candidate) <= width {
+			current = candidate
+			continue
+		}
+		if current != "" {
+			lines = append(lines, current)
+		}
+		current = item
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	if maxLines > 0 && len(lines) > maxLines {
+		last := strings.Join(lines[maxLines-1:], "  ")
+		lines = append(lines[:maxLines-1], xansi.TruncateWc(last, width, ""))
+	}
+	return lines
 }
 
 func (m Model) deleteCurrentBrowseSelection() (Model, tea.Cmd) {
-	if len(m.messageBrowse.turns) == 0 {
-		return m, nil
-	}
-
-	turn := m.currentBrowseTurn()
-	if len(turn.AssistantVersions) == 0 {
-		return m, nil
-	}
-
-	// Delete the active version (in-memory only for now)
-	activeIdx := turn.ActiveVersion
-
-	// Remove from in-memory list
-	turn.AssistantVersions = append(
-		turn.AssistantVersions[:activeIdx],
-		turn.AssistantVersions[activeIdx+1:]...,
-	)
-
-	// If no versions remain, remove the entire turn
-	if len(turn.AssistantVersions) == 0 {
-		m.messageBrowse.turns = append(
-			m.messageBrowse.turns[:m.messageBrowse.turnIdx],
-			m.messageBrowse.turns[m.messageBrowse.turnIdx+1:]...,
-		)
-		if m.messageBrowse.turnIdx >= len(m.messageBrowse.turns) && m.messageBrowse.turnIdx > 0 {
-			m.messageBrowse.turnIdx--
-		}
-		m.statusMsg = "Turn deleted"
-		return m, nil
-	}
-
-	// Promote nearest remaining version
-	if activeIdx >= len(turn.AssistantVersions) {
-		activeIdx = len(turn.AssistantVersions) - 1
-	}
-	turn.ActiveVersion = activeIdx
-	turn.PreviewVersion = activeIdx
-
-	m.statusMsg = "Version deleted"
-	return m, nil
+	return m.openDeleteSelection()
 }
 
 func (m Model) branchFromCurrentBrowseTurn() (Model, tea.Cmd) {
@@ -580,7 +1135,9 @@ func (m Model) branchFromCurrentBrowseTurn() (Model, tea.Cmd) {
 
 	for i := 0; i <= m.messageBrowse.turnIdx; i++ {
 		t := &m.messageBrowse.turns[i]
-		branchMsgs = append(branchMsgs, t.User)
+		if !t.User.Deleted {
+			branchMsgs = append(branchMsgs, t.User)
+		}
 
 		// Use preview version if it differs from active
 		versionIdx := t.ActiveVersion
@@ -602,7 +1159,12 @@ func (m Model) branchFromCurrentBrowseTurn() (Model, tea.Cmd) {
 
 	// Switch to new conversation
 	tab.autoSaveName = newName
-	tab.history.ReplaceMessages(branchMsgs)
+	reloaded, err := m.store.LoadActiveTimeline(newName)
+	if err != nil {
+		m.statusMsg = "Branch reload failed: " + err.Error()
+		return m, nil
+	}
+	tab.history.ReplaceMessages(reloaded)
 	tab.viewport.SetContent(m.buildChatContent())
 	tab.viewport.GotoBottom()
 	tab.chatFollowBottom = true

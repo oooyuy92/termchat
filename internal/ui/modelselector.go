@@ -81,6 +81,9 @@ func (m Model) updateModelSelector(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if provider == nil || model == nil {
 			return m, nil
 		}
+		if m.modelSel.purpose == modelSelectorPickForNewVersion {
+			return m.appendAssistantVersionFromSelection(*provider, *model)
+		}
 		m.tabs[m.activeTab].client = m.newProviderClient(provider.Provider, provider.BaseURL, provider.APIKey, model.Model)
 		m.tabs[m.activeTab].name = model.Model
 		m.statusMsg = fmt.Sprintf("Switched to %s / %s", provider.Name, model.Model)
