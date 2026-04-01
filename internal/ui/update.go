@@ -91,6 +91,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeSlashComplete {
 			return m.updateSlashComplete(msg)
 		}
+		if m.mode == modeModelSelector {
+			return m.updateModelSelector(msg)
+		}
 		if m.mode == modeMessageBrowse {
 			return m.updateMessageBrowse(msg)
 		}

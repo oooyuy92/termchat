@@ -154,6 +154,9 @@ func (m Model) View() string {
 	if m.mode == modeSlashComplete {
 		return m.viewSlashComplete()
 	}
+	if m.mode == modeModelSelector {
+		return m.viewModelSelector()
+	}
 	if m.mode == modeMessageBrowse {
 		return m.viewMessageBrowse()
 	}
