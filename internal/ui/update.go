@@ -269,6 +269,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		// Mouse wheel in message browse mode
+		if m.mode == modeMessageBrowse && msg.Action == tea.MouseActionPress {
+			if m.messageBrowse.mode == browseModeCompare {
+				if msg.Button == tea.MouseButtonWheelDown {
+					m.moveCompareCard(1)
+					return m, nil
+				} else if msg.Button == tea.MouseButtonWheelUp {
+					m.moveCompareCard(-1)
+					return m, nil
+				}
+			}
+		}
 		// Viewport scrolling for the chat area
 		if m.mode == modeChat {
 			tab := &m.tabs[m.activeTab]
