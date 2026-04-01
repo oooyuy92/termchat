@@ -2,6 +2,8 @@
 package storage
 
 import (
+	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,6 +18,47 @@ func newTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { store.Close() })
 	return store
+}
+
+func TestNew_MigratesLegacyMessagesTableForVersionColumns(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "termchat.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE conversations (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			name       TEXT NOT NULL UNIQUE,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE messages (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+			role            TEXT NOT NULL,
+			content         TEXT NOT NULL,
+			seq             INTEGER NOT NULL,
+			created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		t.Fatalf("seed legacy schema error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	store, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.AppendMessage("conv", chat.Message{Seq: 1, Role: "user", Content: "hello"}); err != nil {
+		t.Fatalf("AppendMessage() after migration error = %v", err)
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -235,6 +278,70 @@ func TestConversationStore_InsertAndLoadActiveTimeline(t *testing.T) {
 	}
 }
 
+func TestAppendAssistantMessagePersistsGenerationSnapshot(t *testing.T) {
+	store := newTestStore(t)
+	const name = "conv"
+
+	_, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	_, err = store.AppendMessage(name, chat.Message{
+		Seq:                1,
+		Role:               "assistant",
+		Content:            "a1",
+		VersionNumber:      1,
+		SnapshotProvider:   "anthropic-direct",
+		SnapshotModel:      "claude-sonnet-4-20250514",
+		SnapshotRoleName:   "writer",
+		SnapshotRolePrompt: "be concise",
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage(assistant) error = %v", err)
+	}
+
+	got, err := store.LoadBrowseMessages(name)
+	if err != nil {
+		t.Fatalf("LoadBrowseMessages() error = %v", err)
+	}
+	if got[1].SnapshotProvider != "anthropic-direct" {
+		t.Fatalf("SnapshotProvider = %q, want anthropic-direct", got[1].SnapshotProvider)
+	}
+	if got[1].SnapshotRolePrompt != "be concise" {
+		t.Fatalf("SnapshotRolePrompt = %q, want be concise", got[1].SnapshotRolePrompt)
+	}
+	if !got[1].HasGenerationSnapshot() {
+		t.Fatalf("HasGenerationSnapshot = false, want true")
+	}
+}
+
+func TestLegacyAssistantWithoutSnapshotIsNonReproducible(t *testing.T) {
+	store := newTestStore(t)
+	const name = "conv"
+
+	_, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	_, err = store.AppendMessage(name, chat.Message{
+		Seq:           1,
+		Role:          "assistant",
+		Content:       "legacy",
+		VersionNumber: 1,
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage(assistant) error = %v", err)
+	}
+
+	got, err := store.LoadBrowseMessages(name)
+	if err != nil {
+		t.Fatalf("LoadBrowseMessages() error = %v", err)
+	}
+	if got[1].HasGenerationSnapshot() {
+		t.Fatalf("HasGenerationSnapshot = true, want false")
+	}
+}
+
 func TestConversationStore_SetActiveVersionAndTruncateAfterSeq(t *testing.T) {
 	store := newTestStore(t)
 
@@ -290,5 +397,184 @@ func TestConversationStore_MarkTurnEditedAndClear(t *testing.T) {
 	msgs, _ = store.LoadActiveTimeline(name)
 	if msgs[0].EditedAfterGeneration || msgs[1].StaleAfterUserEdit {
 		t.Fatalf("expected edited/stale flags to clear, got %+v", msgs)
+	}
+}
+
+func TestConversationStore_DeleteVersionPromotesNearestRemaining(t *testing.T) {
+	store := newTestStore(t)
+
+	name := "conv"
+	_, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "hello"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	replyID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(assistant) error = %v", err)
+	}
+	if err := store.InitVersionGroup(replyID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	v2ID, err := store.AppendAssistantVersion(name, replyID, chat.Message{
+		Seq:           1,
+		Role:          "assistant",
+		Content:       "v2",
+		VersionNumber: 2,
+	})
+	if err != nil {
+		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
+	}
+	if err := store.SetActiveVersion(name, replyID, 2); err != nil {
+		t.Fatalf("SetActiveVersion() error = %v", err)
+	}
+
+	if err := store.DeleteVersion(v2ID); err != nil {
+		t.Fatalf("DeleteVersion() error = %v", err)
+	}
+
+	msgs, err := store.LoadActiveTimeline(name)
+	if err != nil {
+		t.Fatalf("LoadActiveTimeline() error = %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("len = %d, want 2", len(msgs))
+	}
+	if msgs[1].Content != "v1" {
+		t.Fatalf("assistant content = %q, want v1", msgs[1].Content)
+	}
+	if msgs[1].TotalVersions != 1 {
+		t.Fatalf("TotalVersions = %d, want 1", msgs[1].TotalVersions)
+	}
+}
+
+func TestConversationStore_SoftDeleteAndRestoreBatch(t *testing.T) {
+	store := newTestStore(t)
+
+	name := "conv"
+	userID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(assistant) error = %v", err)
+	}
+	if err := store.InitVersionGroup(assistantID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{
+		Seq:           1,
+		Role:          "assistant",
+		Content:       "v2",
+		VersionNumber: 2,
+	})
+	if err != nil {
+		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
+	}
+	if err := store.SetActiveVersion(name, assistantID, 2); err != nil {
+		t.Fatalf("SetActiveVersion() error = %v", err)
+	}
+
+	batchID, err := store.SoftDeleteMessages(v2ID, userID)
+	if err != nil {
+		t.Fatalf("SoftDeleteMessages() error = %v", err)
+	}
+	if batchID == 0 {
+		t.Fatalf("batchID = 0, want non-zero")
+	}
+
+	active, err := store.LoadActiveTimeline(name)
+	if err != nil {
+		t.Fatalf("LoadActiveTimeline() error = %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active len = %d, want 1", len(active))
+	}
+	if active[0].Role != "assistant" || active[0].Content != "v1" {
+		t.Fatalf("active timeline = %+v, want surviving assistant v1", active)
+	}
+
+	browse, err := store.LoadBrowseMessages(name)
+	if err != nil {
+		t.Fatalf("LoadBrowseMessages() error = %v", err)
+	}
+	if len(browse) != 3 {
+		t.Fatalf("browse len = %d, want 3", len(browse))
+	}
+	var deletedCount int
+	for _, msg := range browse {
+		if msg.Deleted {
+			deletedCount++
+			if msg.DeletedBatchID != batchID {
+				t.Fatalf("deleted batch id = %d, want %d", msg.DeletedBatchID, batchID)
+			}
+		}
+	}
+	if deletedCount != 2 {
+		t.Fatalf("deletedCount = %d, want 2", deletedCount)
+	}
+
+	if err := store.RestoreDeletedBatch(batchID); err != nil {
+		t.Fatalf("RestoreDeletedBatch() error = %v", err)
+	}
+
+	restored, err := store.LoadActiveTimeline(name)
+	if err != nil {
+		t.Fatalf("LoadActiveTimeline() after restore error = %v", err)
+	}
+	if len(restored) != 2 {
+		t.Fatalf("restored len = %d, want 2", len(restored))
+	}
+	if restored[0].Role != "user" || restored[0].Content != "q1" {
+		t.Fatalf("restored user = %+v, want q1", restored[0])
+	}
+	if restored[1].Content != "v2" {
+		t.Fatalf("restored assistant = %q, want v2", restored[1].Content)
+	}
+}
+
+func TestConversationStore_PurgeDeletedRemovesRows(t *testing.T) {
+	store := newTestStore(t)
+
+	name := "conv"
+	_, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	if err != nil {
+		t.Fatalf("AppendMessage(v1) error = %v", err)
+	}
+	if err := store.InitVersionGroup(assistantID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{
+		Seq:           1,
+		Role:          "assistant",
+		Content:       "v2",
+		VersionNumber: 2,
+	})
+	if err != nil {
+		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
+	}
+
+	if _, err := store.SoftDeleteMessages(v2ID); err != nil {
+		t.Fatalf("SoftDeleteMessages() error = %v", err)
+	}
+	if err := store.PurgeDeleted(); err != nil {
+		t.Fatalf("PurgeDeleted() error = %v", err)
+	}
+
+	browse, err := store.LoadBrowseMessages(name)
+	if err != nil {
+		t.Fatalf("LoadBrowseMessages() error = %v", err)
+	}
+	if len(browse) != 2 {
+		t.Fatalf("browse len after purge = %d, want 2", len(browse))
+	}
+	for _, msg := range browse {
+		if msg.ID == v2ID {
+			t.Fatalf("deleted row %d still present after purge", v2ID)
+		}
 	}
 }

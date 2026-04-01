@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/termchat/termchat/internal/chat"
 	_ "modernc.org/sqlite"
@@ -85,13 +86,108 @@ func migrate(db *sql.DB) error {
 			version_number            INTEGER NOT NULL DEFAULT 1,
 			is_active_version         INTEGER NOT NULL DEFAULT 1,
 			edited_after_generation   INTEGER NOT NULL DEFAULT 0,
-			stale_after_user_edit     INTEGER NOT NULL DEFAULT 0
+			stale_after_user_edit     INTEGER NOT NULL DEFAULT 0,
+			is_deleted                INTEGER NOT NULL DEFAULT 0,
+			deleted_batch_id          INTEGER NOT NULL DEFAULT 0,
+			snapshot_provider         TEXT NOT NULL DEFAULT '',
+			snapshot_model            TEXT NOT NULL DEFAULT '',
+			snapshot_role_name        TEXT NOT NULL DEFAULT '',
+			snapshot_role_prompt      TEXT NOT NULL DEFAULT ''
 		)
 	`)
 	if err != nil {
 		return err
 	}
+	if err := ensureMessagesColumns(tx); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func ensureMessagesColumns(tx *sql.Tx) error {
+	rows, err := tx.Query(`PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	alterStmts := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "version_group_id",
+			sql:  `ALTER TABLE messages ADD COLUMN version_group_id INTEGER`,
+		},
+		{
+			name: "version_number",
+			sql:  `ALTER TABLE messages ADD COLUMN version_number INTEGER NOT NULL DEFAULT 1`,
+		},
+		{
+			name: "is_active_version",
+			sql:  `ALTER TABLE messages ADD COLUMN is_active_version INTEGER NOT NULL DEFAULT 1`,
+		},
+		{
+			name: "edited_after_generation",
+			sql:  `ALTER TABLE messages ADD COLUMN edited_after_generation INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
+			name: "stale_after_user_edit",
+			sql:  `ALTER TABLE messages ADD COLUMN stale_after_user_edit INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
+			name: "is_deleted",
+			sql:  `ALTER TABLE messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
+			name: "deleted_batch_id",
+			sql:  `ALTER TABLE messages ADD COLUMN deleted_batch_id INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
+			name: "snapshot_provider",
+			sql:  `ALTER TABLE messages ADD COLUMN snapshot_provider TEXT NOT NULL DEFAULT ''`,
+		},
+		{
+			name: "snapshot_model",
+			sql:  `ALTER TABLE messages ADD COLUMN snapshot_model TEXT NOT NULL DEFAULT ''`,
+		},
+		{
+			name: "snapshot_role_name",
+			sql:  `ALTER TABLE messages ADD COLUMN snapshot_role_name TEXT NOT NULL DEFAULT ''`,
+		},
+		{
+			name: "snapshot_role_prompt",
+			sql:  `ALTER TABLE messages ADD COLUMN snapshot_role_prompt TEXT NOT NULL DEFAULT ''`,
+		},
+	}
+
+	for _, stmt := range alterStmts {
+		if existing[stmt.name] {
+			continue
+		}
+		if _, err := tx.Exec(stmt.sql); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Save writes all messages for the named conversation, replacing any prior messages.
@@ -125,8 +221,9 @@ func (s *Store) Save(name string, messages []chat.Message) error {
 	// Insert new messages.
 	for i, msg := range messages {
 		if _, err := tx.Exec(
-			`INSERT INTO messages(conversation_id, role, content, seq) VALUES(?, ?, ?, ?)`,
-			convID, msg.Role, msg.Content, i,
+			`INSERT INTO messages(conversation_id, role, content, seq, snapshot_provider, snapshot_model, snapshot_role_name, snapshot_role_prompt)
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+			convID, msg.Role, msg.Content, i, msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
 		); err != nil {
 			return err
 		}
@@ -245,9 +342,13 @@ func (s *Store) AppendMessage(name string, msg chat.Message) (int64, error) {
 	}
 
 	result, err := tx.Exec(
-		`INSERT INTO messages(conversation_id, role, content, seq, version_number, is_active_version, edited_after_generation, stale_after_user_edit)
-		 VALUES(?, ?, ?, ?, ?, 1, 0, 0)`,
+		`INSERT INTO messages(
+			conversation_id, role, content, seq, version_number, is_active_version,
+			edited_after_generation, stale_after_user_edit,
+			snapshot_provider, snapshot_model, snapshot_role_name, snapshot_role_prompt
+		) VALUES(?, ?, ?, ?, ?, 1, 0, 0, ?, ?, ?, ?)`,
 		convID, msg.Role, msg.Content, msg.Seq, msg.VersionNumber,
+		msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
 	)
 	if err != nil {
 		return 0, err
@@ -293,9 +394,13 @@ func (s *Store) AppendAssistantVersion(name string, anchorID int64, msg chat.Mes
 	}
 
 	result, err := tx.Exec(
-		`INSERT INTO messages(conversation_id, role, content, seq, version_group_id, version_number, is_active_version, edited_after_generation, stale_after_user_edit)
-		 VALUES(?, ?, ?, ?, ?, ?, 0, 0, 0)`,
+		`INSERT INTO messages(
+			conversation_id, role, content, seq, version_group_id, version_number,
+			is_active_version, edited_after_generation, stale_after_user_edit,
+			snapshot_provider, snapshot_model, snapshot_role_name, snapshot_role_prompt
+		) VALUES(?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)`,
 		convID, msg.Role, msg.Content, msg.Seq, versionGroupID, msg.VersionNumber,
+		msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
 	)
 	if err != nil {
 		return 0, err
@@ -338,13 +443,20 @@ func (s *Store) LoadActiveTimeline(name string) ([]chat.Message, error) {
 				ELSE (
 					SELECT COUNT(*)
 					FROM messages mv
-					WHERE mv.version_group_id = m.version_group_id
+					WHERE mv.version_group_id = m.version_group_id AND mv.is_deleted = 0
 				)
 			END AS total_versions,
+			m.is_active_version,
 			m.edited_after_generation,
-			m.stale_after_user_edit
+			m.stale_after_user_edit,
+			m.is_deleted,
+			m.deleted_batch_id,
+			m.snapshot_provider,
+			m.snapshot_model,
+			m.snapshot_role_name,
+			m.snapshot_role_prompt
 		FROM messages m
-		WHERE m.conversation_id = ? AND m.is_active_version = 1
+		WHERE m.conversation_id = ? AND m.is_active_version = 1 AND m.is_deleted = 0
 		ORDER BY m.seq, m.id
 	`, convID)
 	if err != nil {
@@ -355,6 +467,8 @@ func (s *Store) LoadActiveTimeline(name string) ([]chat.Message, error) {
 	var messages []chat.Message
 	for rows.Next() {
 		var msg chat.Message
+		var isActive int
+		var isDeleted int
 		if err := rows.Scan(
 			&msg.ID,
 			&msg.Role,
@@ -363,11 +477,20 @@ func (s *Store) LoadActiveTimeline(name string) ([]chat.Message, error) {
 			&msg.VersionGroupID,
 			&msg.VersionNumber,
 			&msg.TotalVersions,
+			&isActive,
 			&msg.EditedAfterGeneration,
 			&msg.StaleAfterUserEdit,
+			&isDeleted,
+			&msg.DeletedBatchID,
+			&msg.SnapshotProvider,
+			&msg.SnapshotModel,
+			&msg.SnapshotRoleName,
+			&msg.SnapshotRolePrompt,
 		); err != nil {
 			return nil, err
 		}
+		msg.IsActiveVersion = isActive == 1
+		msg.Deleted = isDeleted == 1
 		messages = append(messages, msg)
 	}
 	return messages, rows.Err()
@@ -386,9 +509,9 @@ func (s *Store) ListVersions(name string, anchorID int64) ([]chat.Message, error
 	}
 
 	rows, err := s.db.Query(`
-		SELECT id, role, content, seq, version_group_id, version_number, is_active_version, edited_after_generation, stale_after_user_edit
+		SELECT id, role, content, seq, version_group_id, version_number, is_active_version, edited_after_generation, stale_after_user_edit, is_deleted, deleted_batch_id, snapshot_provider, snapshot_model, snapshot_role_name, snapshot_role_prompt
 		FROM messages
-		WHERE version_group_id = ?
+		WHERE version_group_id = ? AND is_deleted = 0
 		ORDER BY version_number
 	`, versionGroupID)
 	if err != nil {
@@ -400,6 +523,7 @@ func (s *Store) ListVersions(name string, anchorID int64) ([]chat.Message, error
 	for rows.Next() {
 		var msg chat.Message
 		var isActive int
+		var isDeleted int
 		if err := rows.Scan(
 			&msg.ID,
 			&msg.Role,
@@ -410,9 +534,89 @@ func (s *Store) ListVersions(name string, anchorID int64) ([]chat.Message, error
 			&isActive,
 			&msg.EditedAfterGeneration,
 			&msg.StaleAfterUserEdit,
+			&isDeleted,
+			&msg.DeletedBatchID,
+			&msg.SnapshotProvider,
+			&msg.SnapshotModel,
+			&msg.SnapshotRoleName,
+			&msg.SnapshotRolePrompt,
 		); err != nil {
 			return nil, err
 		}
+		msg.IsActiveVersion = isActive == 1
+		msg.Deleted = isDeleted == 1
+		messages = append(messages, msg)
+	}
+	for i := range messages {
+		messages[i].TotalVersions = len(messages)
+	}
+	return messages, rows.Err()
+}
+
+// LoadBrowseMessages returns all messages for browser assembly, including deleted
+// and inactive assistant versions, ordered for seq-based turn grouping.
+func (s *Store) LoadBrowseMessages(name string) ([]chat.Message, error) {
+	var convID int64
+	err := s.db.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.Query(`
+		SELECT
+			id,
+			role,
+			content,
+			seq,
+			COALESCE(version_group_id, 0),
+			version_number,
+			is_active_version,
+			edited_after_generation,
+			stale_after_user_edit,
+			is_deleted,
+			deleted_batch_id,
+			snapshot_provider,
+			snapshot_model,
+			snapshot_role_name,
+			snapshot_role_prompt
+		FROM messages
+		WHERE conversation_id = ?
+		ORDER BY seq, CASE WHEN role = 'user' THEN 0 ELSE 1 END, version_number, id
+	`, convID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []chat.Message
+	for rows.Next() {
+		var msg chat.Message
+		var isActive int
+		var isDeleted int
+		if err := rows.Scan(
+			&msg.ID,
+			&msg.Role,
+			&msg.Content,
+			&msg.Seq,
+			&msg.VersionGroupID,
+			&msg.VersionNumber,
+			&isActive,
+			&msg.EditedAfterGeneration,
+			&msg.StaleAfterUserEdit,
+			&isDeleted,
+			&msg.DeletedBatchID,
+			&msg.SnapshotProvider,
+			&msg.SnapshotModel,
+			&msg.SnapshotRoleName,
+			&msg.SnapshotRolePrompt,
+		); err != nil {
+			return nil, err
+		}
+		msg.IsActiveVersion = isActive == 1
+		msg.Deleted = isDeleted == 1
 		messages = append(messages, msg)
 	}
 	return messages, rows.Err()
@@ -441,6 +645,216 @@ func (s *Store) SetActiveVersion(name string, versionGroupID int64, versionNumbe
 	}
 
 	return tx.Commit()
+}
+
+// DeleteVersion deletes a specific version from a version group and promotes
+// the nearest remaining version when the deleted version was active.
+func (s *Store) DeleteVersion(messageID int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var versionGroupID int64
+	var versionNumber int
+	var wasActive int
+	err = tx.QueryRow(
+		`SELECT version_group_id, version_number, is_active_version FROM messages WHERE id = ?`,
+		messageID,
+	).Scan(&versionGroupID, &versionNumber, &wasActive)
+	if err != nil {
+		return err
+	}
+
+	var count int
+	if err := tx.QueryRow(
+		`SELECT COUNT(*) FROM messages WHERE version_group_id = ?`,
+		versionGroupID,
+	).Scan(&count); err != nil {
+		return err
+	}
+	if count <= 1 {
+		return errors.New("cannot delete last version in group")
+	}
+
+	if _, err := tx.Exec(`DELETE FROM messages WHERE id = ?`, messageID); err != nil {
+		return err
+	}
+
+	if wasActive == 1 {
+		var promotedID int64
+		err := tx.QueryRow(
+			`SELECT id
+			 FROM messages
+			 WHERE version_group_id = ?
+			 ORDER BY ABS(version_number - ?), version_number
+			 LIMIT 1`,
+			versionGroupID, versionNumber,
+		).Scan(&promotedID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE messages SET is_active_version = 1 WHERE id = ?`, promotedID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) SoftDeleteMessages(ids ...int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	batchID := time.Now().UnixNano()
+	type promotedVersionGroup struct {
+		versionGroupID int64
+		versionNumber  int
+	}
+	var affectedGroups []promotedVersionGroup
+	for _, id := range ids {
+		var role string
+		var versionGroupID sql.NullInt64
+		var versionNumber int
+		var isActive int
+		if err := tx.QueryRow(
+			`SELECT role, version_group_id, version_number, is_active_version FROM messages WHERE id = ?`,
+			id,
+		).Scan(&role, &versionGroupID, &versionNumber, &isActive); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(
+			`UPDATE messages
+			 SET is_deleted = 1, deleted_batch_id = ?
+			 WHERE id = ?`,
+			batchID, id,
+		); err != nil {
+			return 0, err
+		}
+		if role == "assistant" && versionGroupID.Valid && isActive == 1 {
+			affectedGroups = append(affectedGroups, promotedVersionGroup{
+				versionGroupID: versionGroupID.Int64,
+				versionNumber:  versionNumber,
+			})
+		}
+	}
+
+	for _, group := range affectedGroups {
+		var promotedID int64
+		err := tx.QueryRow(
+			`SELECT id
+			 FROM messages
+			 WHERE version_group_id = ? AND is_deleted = 0
+			 ORDER BY ABS(version_number - ?), version_number
+			 LIMIT 1`,
+			group.versionGroupID, group.versionNumber,
+		).Scan(&promotedID)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+
+		if _, err := tx.Exec(
+			`UPDATE messages
+			 SET is_active_version = 0
+			 WHERE version_group_id = ? AND is_deleted = 0`,
+			group.versionGroupID,
+		); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(
+			`UPDATE messages SET is_active_version = 1 WHERE id = ?`,
+			promotedID,
+		); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return batchID, nil
+}
+
+func (s *Store) RestoreDeletedBatch(batchID int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(
+		`SELECT id, role, version_group_id, is_active_version
+		 FROM messages
+		 WHERE deleted_batch_id = ?`,
+		batchID,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type restoreRow struct {
+		id             int64
+		role           string
+		versionGroupID sql.NullInt64
+		isActive       int
+	}
+	var restoreRows []restoreRow
+	for rows.Next() {
+		var row restoreRow
+		if err := rows.Scan(&row.id, &row.role, &row.versionGroupID, &row.isActive); err != nil {
+			return err
+		}
+		restoreRows = append(restoreRows, row)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
+		`UPDATE messages
+		 SET is_deleted = 0, deleted_batch_id = 0
+		 WHERE deleted_batch_id = ?`,
+		batchID,
+	); err != nil {
+		return err
+	}
+
+	for _, row := range restoreRows {
+		if row.role != "assistant" || !row.versionGroupID.Valid || row.isActive != 1 {
+			continue
+		}
+		if _, err := tx.Exec(
+			`UPDATE messages SET is_active_version = 0 WHERE version_group_id = ?`,
+			row.versionGroupID.Int64,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			`UPDATE messages SET is_active_version = 1 WHERE id = ?`,
+			row.id,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) PurgeDeleted() error {
+	_, err := s.db.Exec(`DELETE FROM messages WHERE is_deleted = 1`)
+	return err
 }
 
 // TruncateAfterSeq deletes all messages with seq > the given value.
@@ -516,4 +930,3 @@ func (s *Store) ClearTurnEdited(userID, assistantID int64) error {
 
 	return tx.Commit()
 }
-

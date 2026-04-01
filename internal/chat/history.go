@@ -16,8 +16,15 @@ type Message struct {
 	VersionGroupID        int64       `json:"version_group_id"`
 	VersionNumber         int         `json:"version_number"`
 	TotalVersions         int         `json:"total_versions"`
+	IsActiveVersion       bool        `json:"is_active_version"`
 	EditedAfterGeneration bool        `json:"edited_after_generation"`
 	StaleAfterUserEdit    bool        `json:"stale_after_user_edit"`
+	Deleted               bool        `json:"deleted"`
+	DeletedBatchID        int64       `json:"deleted_batch_id"`
+	SnapshotProvider      string      `json:"snapshot_provider"`
+	SnapshotModel         string      `json:"snapshot_model"`
+	SnapshotRoleName      string      `json:"snapshot_role_name"`
+	SnapshotRolePrompt    string      `json:"snapshot_role_prompt"`
 }
 
 type History struct {
@@ -31,6 +38,10 @@ func NewHistory() *History {
 
 func (h *History) SetSystemPrompt(prompt string) {
 	h.systemPrompt = prompt
+}
+
+func (h *History) SystemPrompt() string {
+	return h.systemPrompt
 }
 
 func (h *History) Add(msg Message) {
@@ -77,4 +88,10 @@ func (h *History) Truncate(n int) {
 
 func (h *History) ReplaceMessages(messages []Message) {
 	h.messages = append(h.messages[:0], messages...)
+}
+
+func (m Message) HasGenerationSnapshot() bool {
+	return m.SnapshotProvider != "" &&
+		m.SnapshotModel != "" &&
+		m.SnapshotRolePrompt != ""
 }
