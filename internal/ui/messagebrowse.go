@@ -45,6 +45,68 @@ func writeToClipboard(text string) error {
 	return cmd.Run()
 }
 
+func (m *Model) currentBrowseTurn() *browseTurn {
+	return &m.messageBrowse.turns[m.messageBrowse.turnIdx]
+}
+
+func (m *Model) movePreviewVersion(delta int) {
+	turn := m.currentBrowseTurn()
+	next := turn.PreviewVersion + delta
+	if next < 0 || next >= len(turn.AssistantVersions) {
+		return
+	}
+	turn.PreviewVersion = next
+}
+
+func (m *Model) moveCompareCard(delta int) {
+	next := m.messageBrowse.compareCardIdx + delta
+	if next < 0 || next >= len(m.currentBrowseTurn().AssistantVersions) {
+		return
+	}
+	m.messageBrowse.compareCardIdx = next
+	m.currentBrowseTurn().PreviewVersion = next
+}
+
+func (m Model) confirmOrApplyPreview() (Model, tea.Cmd) {
+	turn := m.currentBrowseTurn()
+
+	// No-op if preview == active
+	if turn.PreviewVersion == turn.ActiveVersion {
+		return m, nil
+	}
+
+	// Check if there are later turns
+	hasLaterTurns := m.messageBrowse.turnIdx < len(m.messageBrowse.turns)-1
+
+	if !hasLaterTurns {
+		// Apply immediately if no later turns
+		turn.ActiveVersion = turn.PreviewVersion
+		m.statusMsg = "Version applied"
+		return m, nil
+	}
+
+	// Open confirmation chooser
+	m.messageBrowse.pendingConfirm = browseConfirmState{
+		kind:   confirmApplyPreview,
+		cursor: 0,
+	}
+	return m, nil
+}
+
+func (m Model) applyBrowseConfirmation() (Model, tea.Cmd) {
+	switch m.messageBrowse.pendingConfirm.kind {
+	case confirmApplyPreview:
+		// TODO: implement apply/branch logic based on cursor
+		// For now, just apply
+		turn := m.currentBrowseTurn()
+		turn.ActiveVersion = turn.PreviewVersion
+		m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
+		m.statusMsg = "Version applied"
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Reset confirmQuit on any key other than ctrl+c
 	if msg.String() != "ctrl+c" {
@@ -78,7 +140,34 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.browseCursor++
 		}
 
+	case "left", "h":
+		if m.messageBrowse.mode == browseModeCompare {
+			m.moveCompareCard(-1)
+		} else {
+			m.movePreviewVersion(-1)
+		}
+
+	case "right", "l":
+		if m.messageBrowse.mode == browseModeCompare {
+			m.moveCompareCard(1)
+		} else {
+			m.movePreviewVersion(1)
+		}
+
+	case "v":
+		if len(m.messageBrowse.turns) > 0 && m.currentBrowseTurn().VersionCount() > 1 {
+			m.messageBrowse.mode = browseModeCompare
+			m.messageBrowse.compareCardIdx = m.currentBrowseTurn().PreviewVersion
+		}
+
 	case "enter":
+		if m.messageBrowse.pendingConfirm.kind != confirmNone {
+			return m.applyBrowseConfirmation()
+		}
+		// Old rollback logic - only if not in browse mode with turns
+		if len(m.messageBrowse.turns) > 0 {
+			return m.confirmOrApplyPreview()
+		}
 		// Rollback: keep messages[0..cursor] inclusive
 		if len(msgs) == 0 {
 			return m, nil
@@ -169,40 +258,77 @@ func (m Model) viewMessageBrowse() string {
 	}
 	turn := m.messageBrowse.turns[turnIdx]
 
-	// Calculate pane width (split screen in half, minus some padding)
-	paneWidth := (m.width - 3) / 2
-	if paneWidth < 20 {
-		paneWidth = 20
-	}
+	var body string
 
-	// Render left pane (User)
-	left := renderBrowsePane("User", turn.User.Content, m.messageBrowse.leftScroll, paneWidth, m.height, m.theme)
-
-	// Render right pane (Assistant with version)
-	var right string
-	if len(turn.AssistantVersions) > 0 {
-		previewIdx := turn.PreviewVersion
-		if previewIdx >= len(turn.AssistantVersions) {
-			previewIdx = 0
+	// Compare mode: render multiple version cards
+	if m.messageBrowse.mode == browseModeCompare {
+		if m.messageBrowse.compareCardScrolls == nil {
+			m.messageBrowse.compareCardScrolls = make(map[int]int)
 		}
-		rightMsg := turn.AssistantVersions[previewIdx]
-		rightTitle := fmt.Sprintf("Assistant v%d/%d", rightMsg.VersionNumber, rightMsg.TotalVersions)
 
-		// Render assistant content with markdown
-		var content string
-		rendered, err := tab.renderer.Render(rightMsg.Content)
-		if err != nil {
-			content = rightMsg.Content
-		} else {
-			content = cleanGlamourOutput(rendered)
+		cardWidth := (m.width - 4) / len(turn.AssistantVersions)
+		if cardWidth < 20 {
+			cardWidth = 20
 		}
-		right = renderBrowsePane(rightTitle, content, m.messageBrowse.rightScroll, paneWidth, m.height, m.theme)
+
+		var cards []string
+		for idx, msg := range turn.AssistantVersions {
+			scroll := m.messageBrowse.compareCardScrolls[idx]
+			isSelected := idx == m.messageBrowse.compareCardIdx
+
+			// Render content with markdown
+			var content string
+			rendered, err := tab.renderer.Render(msg.Content)
+			if err != nil {
+				content = msg.Content
+			} else {
+				content = cleanGlamourOutput(rendered)
+			}
+
+			title := fmt.Sprintf("v%d/%d", msg.VersionNumber, msg.TotalVersions)
+			if isSelected {
+				title = "► " + title
+			}
+			card := renderBrowsePane(title, content, scroll, cardWidth, m.height, m.theme)
+			cards = append(cards, card)
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, cards...)
 	} else {
-		right = renderBrowsePane("Assistant", "(no versions)", 0, paneWidth, m.height, m.theme)
-	}
+		// Message mode: render left/right panes
+		paneWidth := (m.width - 3) / 2
+		if paneWidth < 20 {
+			paneWidth = 20
+		}
 
-	// Join panes horizontally
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+		// Render left pane (User)
+		left := renderBrowsePane("User", turn.User.Content, m.messageBrowse.leftScroll, paneWidth, m.height, m.theme)
+
+		// Render right pane (Assistant with version)
+		var right string
+		if len(turn.AssistantVersions) > 0 {
+			previewIdx := turn.PreviewVersion
+			if previewIdx >= len(turn.AssistantVersions) {
+				previewIdx = 0
+			}
+			rightMsg := turn.AssistantVersions[previewIdx]
+			rightTitle := fmt.Sprintf("Assistant v%d/%d", rightMsg.VersionNumber, rightMsg.TotalVersions)
+
+			// Render assistant content with markdown
+			var content string
+			rendered, err := tab.renderer.Render(rightMsg.Content)
+			if err != nil {
+				content = rightMsg.Content
+			} else {
+				content = cleanGlamourOutput(rendered)
+			}
+			right = renderBrowsePane(rightTitle, content, m.messageBrowse.rightScroll, paneWidth, m.height, m.theme)
+		} else {
+			right = renderBrowsePane("Assistant", "(no versions)", 0, paneWidth, m.height, m.theme)
+		}
+
+		// Join panes horizontally
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	}
 
 	// Footer help
 	help := m.theme.ConfigHelpStyle().Render(

@@ -87,7 +87,11 @@ func (m Model) buildChatContent() string {
 			bubble := m.theme.UserMsgStyle().Render(block)
 			b.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Right, bubble) + "\n\n")
 		case "assistant":
-			b.WriteString(m.theme.AssistantLabelStyle().Render(tab.client.Model()+":") + "\n")
+			label := tab.client.Model() + ":"
+			if msg.TotalVersions > 1 {
+				label = fmt.Sprintf("%s [%d versions]", label, msg.TotalVersions)
+			}
+			b.WriteString(m.theme.AssistantLabelStyle().Render(label) + "\n")
 			rendered, err := tab.renderer.Render(msg.Content)
 			if err != nil {
 				b.WriteString(msg.Content + "\n\n")

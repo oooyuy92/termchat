@@ -158,6 +158,19 @@ const (
 	browseModeCompare
 )
 
+type browseConfirmKind int
+
+const (
+	confirmNone browseConfirmKind = iota
+	confirmApplyPreview
+	confirmEditRegenerate
+)
+
+type browseConfirmState struct {
+	kind   browseConfirmKind
+	cursor int
+}
+
 type browseTurn struct {
 	User              chat.Message
 	AssistantVersions []chat.Message
@@ -177,6 +190,7 @@ type messageBrowseState struct {
 	rightScroll        int
 	compareCardIdx     int
 	compareCardScrolls map[int]int
+	pendingConfirm     browseConfirmState
 }
 
 type Model struct {

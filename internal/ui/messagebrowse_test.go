@@ -4,6 +4,7 @@ package ui
 import (
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 	"github.com/termchat/termchat/internal/storage"
@@ -74,5 +75,71 @@ func TestIncrementalPersistence(t *testing.T) {
 	}
 	if msgs[0].Content != "q1" {
 		t.Fatalf("expected content 'q1', got %q", msgs[0].Content)
+	}
+}
+
+func newVersionedBrowseModel(t *testing.T) Model {
+	t.Helper()
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+	m.messageBrowse.turns = []browseTurn{
+		{
+			User: chat.Message{ID: 1, Seq: 1, Role: "user", Content: "q1"},
+			AssistantVersions: []chat.Message{
+				{ID: 2, Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: 2, VersionNumber: 1, TotalVersions: 2},
+				{ID: 3, Seq: 1, Role: "assistant", Content: "v2", VersionGroupID: 2, VersionNumber: 2, TotalVersions: 2},
+			},
+			ActiveVersion:  0,
+			PreviewVersion: 0,
+		},
+		{
+			User: chat.Message{ID: 4, Seq: 2, Role: "user", Content: "q2"},
+			AssistantVersions: []chat.Message{
+				{ID: 5, Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, TotalVersions: 1},
+			},
+			ActiveVersion:  0,
+			PreviewVersion: 0,
+		},
+	}
+	return m
+}
+
+func TestMessageBrowse_RightArrowChangesPreviewOnly(t *testing.T) {
+	m := newVersionedBrowseModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.mode = browseModeMessage
+
+	before := m.messageBrowse.turns[0].ActiveVersion
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRight})
+
+	if m.messageBrowse.turns[0].ActiveVersion != before {
+		t.Fatalf("active version changed during preview navigation")
+	}
+	if m.messageBrowse.turns[0].PreviewVersion == before {
+		t.Fatalf("preview version did not move")
+	}
+}
+
+func TestMessageBrowse_EnterOnPreviewWithLaterTurnsOpensConfirmation(t *testing.T) {
+	m := newVersionedBrowseModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.mode = browseModeMessage
+	m.messageBrowse.turnIdx = 0
+	m.messageBrowse.turns[0].PreviewVersion = 1
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.messageBrowse.pendingConfirm.kind != confirmApplyPreview {
+		t.Fatalf("pending confirm kind = %v, want confirmApplyPreview", m.messageBrowse.pendingConfirm.kind)
+	}
+}
+
+func TestMessageBrowse_VEntersCompareMode(t *testing.T) {
+	m := newVersionedBrowseModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.mode = browseModeMessage
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if m.messageBrowse.mode != browseModeCompare {
+		t.Fatalf("mode = %v, want browseModeCompare", m.messageBrowse.mode)
 	}
 }
