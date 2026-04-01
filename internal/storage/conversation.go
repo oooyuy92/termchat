@@ -75,11 +75,17 @@ func migrate(db *sql.DB) error {
 	}
 	_, err = tx.Exec(`
 		CREATE TABLE IF NOT EXISTS messages (
-			id              INTEGER PRIMARY KEY AUTOINCREMENT,
-			conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-			role            TEXT NOT NULL,
-			content         TEXT NOT NULL,
-			seq             INTEGER NOT NULL
+			id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id           INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+			role                      TEXT NOT NULL,
+			content                   TEXT NOT NULL,
+			seq                       INTEGER NOT NULL,
+			created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			version_group_id          INTEGER,
+			version_number            INTEGER NOT NULL DEFAULT 1,
+			is_active_version         INTEGER NOT NULL DEFAULT 1,
+			edited_after_generation   INTEGER NOT NULL DEFAULT 0,
+			stale_after_user_edit     INTEGER NOT NULL DEFAULT 0
 		)
 	`)
 	if err != nil {
@@ -133,34 +139,7 @@ func (s *Store) Save(name string, messages []chat.Message) error {
 // Returns ErrNotFound if no conversation with that name exists.
 // Returns an empty slice (not an error) if the conversation exists but has no messages.
 func (s *Store) Load(name string) ([]chat.Message, error) {
-	// Check conversation exists.
-	var convID int64
-	err := s.db.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID)
-	if err == sql.ErrNoRows {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	rows, err := s.db.Query(
-		`SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY seq`,
-		convID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	messages := []chat.Message{}
-	for rows.Next() {
-		var msg chat.Message
-		if err := rows.Scan(&msg.Role, &msg.Content); err != nil {
-			return nil, err
-		}
-		messages = append(messages, msg)
-	}
-	return messages, rows.Err()
+	return s.LoadActiveTimeline(name)
 }
 
 // List returns all conversation names ordered by most recently updated.
@@ -241,3 +220,299 @@ func (s *Store) LoadAllForSearch() ([]ConvSearchItem, error) {
 func (s *Store) Close() error {
 	return s.db.Close()
 }
+
+// AppendMessage inserts a new message into the conversation and returns its ID.
+func (s *Store) AppendMessage(name string, msg chat.Message) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
+		`INSERT INTO conversations(name, updated_at) VALUES(?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP`,
+		name,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	var convID int64
+	if err := tx.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID); err != nil {
+		return 0, err
+	}
+
+	result, err := tx.Exec(
+		`INSERT INTO messages(conversation_id, role, content, seq, version_number, is_active_version, edited_after_generation, stale_after_user_edit)
+		 VALUES(?, ?, ?, ?, ?, 1, 0, 0)`,
+		convID, msg.Role, msg.Content, msg.Seq, msg.VersionNumber,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	messageID, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return messageID, nil
+}
+
+// InitVersionGroup sets the version_group_id of a message to its own ID.
+func (s *Store) InitVersionGroup(messageID int64) error {
+	_, err := s.db.Exec(
+		`UPDATE messages SET version_group_id = ? WHERE id = ?`,
+		messageID, messageID,
+	)
+	return err
+}
+
+// AppendAssistantVersion adds a new version to an existing version group.
+func (s *Store) AppendAssistantVersion(name string, anchorID int64, msg chat.Message) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var convID int64
+	if err := tx.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID); err != nil {
+		return 0, err
+	}
+
+	var versionGroupID int64
+	if err := tx.QueryRow(`SELECT version_group_id FROM messages WHERE id = ?`, anchorID).Scan(&versionGroupID); err != nil {
+		return 0, err
+	}
+
+	result, err := tx.Exec(
+		`INSERT INTO messages(conversation_id, role, content, seq, version_group_id, version_number, is_active_version, edited_after_generation, stale_after_user_edit)
+		 VALUES(?, ?, ?, ?, ?, ?, 0, 0, 0)`,
+		convID, msg.Role, msg.Content, msg.Seq, versionGroupID, msg.VersionNumber,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	messageID, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return messageID, nil
+}
+
+// LoadActiveTimeline returns all active messages for the conversation ordered by seq.
+func (s *Store) LoadActiveTimeline(name string) ([]chat.Message, error) {
+	var convID int64
+	err := s.db.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.Query(`
+		SELECT
+			m.id,
+			m.role,
+			m.content,
+			m.seq,
+			COALESCE(m.version_group_id, 0),
+			m.version_number,
+			CASE
+				WHEN m.role != 'assistant' THEN 1
+				WHEN m.version_group_id IS NULL THEN 1
+				ELSE (
+					SELECT COUNT(*)
+					FROM messages mv
+					WHERE mv.version_group_id = m.version_group_id
+				)
+			END AS total_versions,
+			m.edited_after_generation,
+			m.stale_after_user_edit
+		FROM messages m
+		WHERE m.conversation_id = ? AND m.is_active_version = 1
+		ORDER BY m.seq, m.id
+	`, convID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []chat.Message
+	for rows.Next() {
+		var msg chat.Message
+		if err := rows.Scan(
+			&msg.ID,
+			&msg.Role,
+			&msg.Content,
+			&msg.Seq,
+			&msg.VersionGroupID,
+			&msg.VersionNumber,
+			&msg.TotalVersions,
+			&msg.EditedAfterGeneration,
+			&msg.StaleAfterUserEdit,
+		); err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+	return messages, rows.Err()
+}
+
+// ListVersions returns all versions in a version group ordered by version_number.
+func (s *Store) ListVersions(name string, anchorID int64) ([]chat.Message, error) {
+	var convID int64
+	if err := s.db.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID); err != nil {
+		return nil, err
+	}
+
+	var versionGroupID int64
+	if err := s.db.QueryRow(`SELECT version_group_id FROM messages WHERE id = ?`, anchorID).Scan(&versionGroupID); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, role, content, seq, version_group_id, version_number, is_active_version, edited_after_generation, stale_after_user_edit
+		FROM messages
+		WHERE version_group_id = ?
+		ORDER BY version_number
+	`, versionGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []chat.Message
+	for rows.Next() {
+		var msg chat.Message
+		var isActive int
+		if err := rows.Scan(
+			&msg.ID,
+			&msg.Role,
+			&msg.Content,
+			&msg.Seq,
+			&msg.VersionGroupID,
+			&msg.VersionNumber,
+			&isActive,
+			&msg.EditedAfterGeneration,
+			&msg.StaleAfterUserEdit,
+		); err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+	return messages, rows.Err()
+}
+
+// SetActiveVersion marks a specific version as active in its version group.
+func (s *Store) SetActiveVersion(name string, versionGroupID int64, versionNumber int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`UPDATE messages SET is_active_version = 0 WHERE version_group_id = ?`,
+		versionGroupID,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
+		`UPDATE messages SET is_active_version = 1 WHERE version_group_id = ? AND version_number = ?`,
+		versionGroupID, versionNumber,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// TruncateAfterSeq deletes all messages with seq > the given value.
+func (s *Store) TruncateAfterSeq(name string, seq int) error {
+	var convID int64
+	if err := s.db.QueryRow(`SELECT id FROM conversations WHERE name = ?`, name).Scan(&convID); err != nil {
+		return err
+	}
+
+	_, err := s.db.Exec(
+		`DELETE FROM messages WHERE conversation_id = ? AND seq > ?`,
+		convID, seq,
+	)
+	return err
+}
+
+// UpdateMessageContent updates the content of a specific message.
+func (s *Store) UpdateMessageContent(messageID int64, content string) error {
+	_, err := s.db.Exec(
+		`UPDATE messages SET content = ? WHERE id = ?`,
+		content, messageID,
+	)
+	return err
+}
+
+// MarkTurnEdited sets edited_after_generation=1 for the assistant message
+// and stale_after_user_edit=1 for the user message.
+func (s *Store) MarkTurnEdited(userID, assistantID int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`UPDATE messages SET stale_after_user_edit = 1 WHERE id = ?`,
+		userID,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
+		`UPDATE messages SET edited_after_generation = 1 WHERE id = ?`,
+		assistantID,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// ClearTurnEdited clears the edited flags for a user/assistant pair.
+func (s *Store) ClearTurnEdited(userID, assistantID int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`UPDATE messages SET stale_after_user_edit = 0 WHERE id = ?`,
+		userID,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
+		`UPDATE messages SET edited_after_generation = 0 WHERE id = ?`,
+		assistantID,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+

@@ -187,3 +187,84 @@ func TestListWithDate(t *testing.T) {
 		t.Errorf("convs[1].Summary = %q, want %q", convs[1].Summary, "hello from conv-a")
 	}
 }
+
+func TestConversationStore_InsertAndLoadActiveTimeline(t *testing.T) {
+	store := newTestStore(t)
+
+	name := "conv"
+	userID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "question"})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	replyID, err := store.AppendMessage(name, chat.Message{
+		Seq:           1,
+		Role:          "assistant",
+		Content:       "answer v1",
+		VersionNumber: 1,
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage(assistant) error = %v", err)
+	}
+	if err := store.InitVersionGroup(replyID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	if _, err := store.AppendAssistantVersion(name, replyID, chat.Message{
+		Seq:           1,
+		Role:          "assistant",
+		Content:       "answer v2",
+		VersionNumber: 2,
+	}); err != nil {
+		t.Fatalf("AppendAssistantVersion() error = %v", err)
+	}
+
+	msgs, err := store.LoadActiveTimeline(name)
+	if err != nil {
+		t.Fatalf("LoadActiveTimeline() error = %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("len = %d, want 2", len(msgs))
+	}
+	if msgs[0].ID != userID {
+		t.Fatalf("user ID = %d, want %d", msgs[0].ID, userID)
+	}
+	if msgs[1].Content != "answer v1" {
+		t.Fatalf("assistant content = %q, want answer v1", msgs[1].Content)
+	}
+	if msgs[1].TotalVersions != 2 {
+		t.Fatalf("TotalVersions = %d, want 2", msgs[1].TotalVersions)
+	}
+}
+
+func TestConversationStore_SetActiveVersionAndTruncateAfterSeq(t *testing.T) {
+	store := newTestStore(t)
+
+	name := "conv"
+	_, _ = store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
+	replyID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	_, _ = store.AppendMessage(name, chat.Message{Seq: 2, Role: "user", Content: "q2"})
+	_, _ = store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1})
+
+	if err := store.InitVersionGroup(replyID); err != nil {
+		t.Fatalf("InitVersionGroup() error = %v", err)
+	}
+	if _, err := store.AppendAssistantVersion(name, replyID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2}); err != nil {
+		t.Fatalf("AppendAssistantVersion() error = %v", err)
+	}
+	if err := store.SetActiveVersion(name, replyID, 2); err != nil {
+		t.Fatalf("SetActiveVersion() error = %v", err)
+	}
+	if err := store.TruncateAfterSeq(name, 1); err != nil {
+		t.Fatalf("TruncateAfterSeq() error = %v", err)
+	}
+
+	msgs, err := store.LoadActiveTimeline(name)
+	if err != nil {
+		t.Fatalf("LoadActiveTimeline() error = %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("len = %d, want 2", len(msgs))
+	}
+	if msgs[1].Content != "v2" {
+		t.Fatalf("assistant content = %q, want v2", msgs[1].Content)
+	}
+}
