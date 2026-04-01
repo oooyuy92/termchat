@@ -38,7 +38,59 @@ func newBrowserTestModel(t *testing.T, store *storage.Store) Model {
 	}
 }
 
-func seedConversation(t *testing.T, store *storage.Store, name string, msgs []chat.Message) {
+type seedTurn struct {
+	user      string
+	assistant []string
+}
+
+func seedConversation(t *testing.T, store *storage.Store, name string, turns []seedTurn) {
+	t.Helper()
+	seq := 1
+	for _, turn := range turns {
+		// Add user message
+		userMsg := chat.Message{Role: "user", Content: turn.user, Seq: seq}
+		_, err := store.AppendMessage(name, userMsg)
+		if err != nil {
+			t.Fatalf("AppendMessage(%q) error = %v", turn.user, err)
+		}
+		seq++
+
+		// Add assistant version(s)
+		if len(turn.assistant) > 0 {
+			// First version: append as regular message, then init version group
+			firstMsg := chat.Message{
+				Role:    "assistant",
+				Content: turn.assistant[0],
+				Seq:     seq,
+			}
+			firstID, err := store.AppendMessage(name, firstMsg)
+			if err != nil {
+				t.Fatalf("AppendMessage(%q) error = %v", turn.assistant[0], err)
+			}
+
+			// Initialize version group using first message ID
+			if err := store.InitVersionGroup(firstID); err != nil {
+				t.Fatalf("InitVersionGroup() error = %v", err)
+			}
+
+			// Add additional versions
+			for i := 1; i < len(turn.assistant); i++ {
+				assistantMsg := chat.Message{
+					Role:          "assistant",
+					Content:       turn.assistant[i],
+					Seq:           seq,
+					VersionNumber: i + 1,
+				}
+				if _, err := store.AppendAssistantVersion(name, firstID, assistantMsg); err != nil {
+					t.Fatalf("AppendAssistantVersion(%q) error = %v", turn.assistant[i], err)
+				}
+			}
+			seq++
+		}
+	}
+}
+
+func seedConversationLegacy(t *testing.T, store *storage.Store, name string, msgs []chat.Message) {
 	t.Helper()
 	for _, msg := range msgs {
 		if _, err := store.AppendMessage(name, msg); err != nil {
@@ -61,7 +113,7 @@ func TestIncrementalPersistence(t *testing.T) {
 	model := newBrowserTestModel(t, store)
 
 	// Seed a conversation with a user message
-	seedConversation(t, store, "conv", []chat.Message{
+	seedConversationLegacy(t, store, "conv", []chat.Message{
 		{Seq: 1, Role: "user", Content: "q1"},
 	})
 
@@ -224,7 +276,7 @@ func TestMessageBrowse_DeleteActiveVersionPromotesNearestRemainingVersion(t *tes
 func TestMessageBrowse_BranchUsesPreviewVersionWhenConfirmed(t *testing.T) {
 	store := newBrowserTestStore(t)
 	m := newBrowserTestModel(t, store)
-	seedConversation(t, store, "conv", []chat.Message{
+	seedConversationLegacy(t, store, "conv", []chat.Message{
 		{Seq: 1, Role: "user", Content: "q1"},
 		{Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: 2, VersionNumber: 1},
 		{Seq: 2, Role: "user", Content: "q2"},
@@ -258,5 +310,62 @@ func TestMessageBrowse_CompareModeMouseWheelSetsFocusedCard(t *testing.T) {
 
 	if m.messageBrowse.compareCardIdx == 0 {
 		t.Fatalf("expected mouse wheel to move focus away from first card")
+	}
+}
+
+func TestMessageBrowse_InitializeFromHistory(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+	
+	// Seed conversation with 2 turns
+	seedConversation(t, store, "test", []seedTurn{
+		{user: "first", assistant: []string{"response 1"}},
+		{user: "second", assistant: []string{"response 2a", "response 2b"}},
+	})
+	
+	// Load into tab
+	msgs := mustLoadActiveTimeline(t, store, "test")
+	m.tabs[0].history.ReplaceMessages(msgs)
+	m.tabs[0].autoSaveName = "test"
+	
+	// Simulate double-Esc
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	
+	// Verify browser state initialized
+	if m.mode != modeMessageBrowse {
+		t.Fatal("expected modeMessageBrowse")
+	}
+	if len(m.messageBrowse.turns) != 2 {
+		t.Fatalf("expected 2 turns, got %d", len(m.messageBrowse.turns))
+	}
+	if m.messageBrowse.turnIdx != 1 {
+		t.Fatalf("expected turnIdx=1 (last turn), got %d", m.messageBrowse.turnIdx)
+	}
+	
+	// Verify turn 1
+	turn0 := m.messageBrowse.turns[0]
+	if turn0.User.Content != "first" {
+		t.Errorf("turn 0 user: got %q", turn0.User.Content)
+	}
+	if len(turn0.AssistantVersions) != 1 {
+		t.Fatalf("turn 0: expected 1 version, got %d", len(turn0.AssistantVersions))
+	}
+	
+	// Verify turn 2
+	turn1 := m.messageBrowse.turns[1]
+	if turn1.User.Content != "second" {
+		t.Errorf("turn 1 user: got %q", turn1.User.Content)
+	}
+	if len(turn1.AssistantVersions) != 2 {
+		t.Fatalf("turn 1: expected 2 versions, got %d", len(turn1.AssistantVersions))
+	}
+	if turn1.ActiveVersion != 0 {
+		t.Errorf("turn 1: expected ActiveVersion=0, got %d", turn1.ActiveVersion)
+	}
+	if turn1.PreviewVersion != 0 {
+		t.Errorf("turn 1: expected PreviewVersion=0, got %d", turn1.PreviewVersion)
 	}
 }

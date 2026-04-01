@@ -149,7 +149,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusMsg = "No messages to browse"
 					return m, nil
 				}
-				m.browseCursor = len(tab.history.Messages()) - 1
+
+				// Build browser state from history
+				if err := m.buildBrowserState(); err != nil {
+					m.statusMsg = "Failed to build browser: " + err.Error()
+					return m, nil
+				}
+
 				m.mode = modeMessageBrowse
 			} else {
 				m.statusMsg = "Press Esc again to browse messages"

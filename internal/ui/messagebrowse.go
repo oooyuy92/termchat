@@ -50,6 +50,72 @@ func (m *Model) currentBrowseTurn() *browseTurn {
 	return &m.messageBrowse.turns[m.messageBrowse.turnIdx]
 }
 
+// buildBrowserState constructs messageBrowse.turns from active timeline.
+// Groups messages into user-assistant pairs, loads all versions for each assistant message.
+func (m *Model) buildBrowserState() error {
+	tab := &m.tabs[m.activeTab]
+	msgs := tab.history.Messages()
+
+	if len(msgs) == 0 {
+		return fmt.Errorf("no messages to browse")
+	}
+
+	m.messageBrowse.turns = nil
+	m.messageBrowse.compareCardScrolls = make(map[int]int)
+
+	for i := 0; i < len(msgs); i++ {
+		if msgs[i].Role != "user" {
+			continue
+		}
+
+		userMsg := msgs[i]
+
+		// Find assistant message(s) after this user message
+		var assistantVersions []chat.Message
+		if i+1 < len(msgs) && msgs[i+1].Role == "assistant" {
+			anchorID := msgs[i+1].ID
+			versions, err := m.store.ListVersions(tab.autoSaveName, anchorID)
+			if err != nil {
+				return err
+			}
+			assistantVersions = versions
+		}
+
+		// Find which version is active
+		activeIdx := 0
+		if len(assistantVersions) > 0 {
+			for idx, v := range assistantVersions {
+				// The active timeline message ID matches one of the versions
+				if i+1 < len(msgs) && v.ID == msgs[i+1].ID {
+					activeIdx = idx
+					break
+				}
+			}
+		}
+
+		m.messageBrowse.turns = append(m.messageBrowse.turns, browseTurn{
+			User:              userMsg,
+			AssistantVersions: assistantVersions,
+			ActiveVersion:     activeIdx,
+			PreviewVersion:    activeIdx,
+		})
+
+		// Skip the assistant message we just processed
+		if len(assistantVersions) > 0 {
+			i++
+		}
+	}
+
+	// Start at last turn
+	m.messageBrowse.turnIdx = len(m.messageBrowse.turns) - 1
+	m.messageBrowse.mode = browseModeMessage
+	m.messageBrowse.leftScroll = 0
+	m.messageBrowse.rightScroll = 0
+	m.messageBrowse.compareCardIdx = 0
+
+	return nil
+}
+
 func (m *Model) movePreviewVersion(delta int) {
 	turn := m.currentBrowseTurn()
 	next := turn.PreviewVersion + delta
