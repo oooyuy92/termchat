@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -13,29 +12,9 @@ import (
 
 func buildConfigFields(cfg config.Config) []configField {
 	return []configField{
-		{Label: "Provider", Key: "provider", Value: cfg.API.Provider,
-			Options: []string{"openai", "openai-compatible", "anthropic", "gemini"}},
-		{Label: "API Base URL", Key: "base_url", Value: cfg.API.BaseURL},
-		{Label: "API Key", Key: "api_key", Value: cfg.API.APIKey, Masked: true},
-		{Label: "Model", Key: "model", Value: cfg.API.Model},
-		{Label: "Temperature", Key: "temperature", Value: fmt.Sprintf("%.2f", cfg.Parameters.Temperature)},
-		{Label: "Max Tokens", Key: "max_tokens", Value: strconv.Itoa(cfg.Parameters.MaxTokens)},
-		{Label: "Reasoning Effort", Key: "reasoning_effort", Value: cfg.Parameters.ReasoningEffort, Options: []string{"", "minimal", "low", "medium", "high"}},
-		{Label: "Budget Tokens", Key: "budget_tokens", Value: strconv.Itoa(cfg.Parameters.BudgetTokens)},
 		{Label: "Terminal BG", Key: "theme", Value: cfg.Settings.Theme, Options: []string{"dark", "light"}},
 		{Label: "Alt Screen", Key: "alternate_screen", Value: cfg.Settings.AlternateScreen, Options: []string{"auto", "always", "never"}},
 		{Label: "Export Dir", Key: "export_dir", Value: cfg.Settings.ExportDir},
-	}
-}
-
-// buildOnboardFields returns the 3 API fields needed for first-run onboarding.
-func buildOnboardFields(cfg config.Config) []configField {
-	return []configField{
-		{Label: "Provider", Key: "provider", Value: cfg.API.Provider,
-			Options: []string{"openai", "openai-compatible", "anthropic", "gemini"}},
-		{Label: "API Base URL", Key: "base_url", Value: cfg.API.BaseURL},
-		{Label: "API Key", Key: "api_key", Value: cfg.API.APIKey, Masked: true},
-		{Label: "Model", Key: "model", Value: cfg.API.Model},
 	}
 }
 
@@ -58,6 +37,11 @@ func validateField(key, value string) string {
 	case "model":
 		if value == "" {
 			return "must not be empty"
+		}
+	case "api_format":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v != "openai" && v != "openai-compatible" && v != "anthropic" && v != "gemini" {
+			return "must be openai, openai-compatible, anthropic, or gemini"
 		}
 	case "temperature":
 		f, err := strconv.ParseFloat(value, 64)
@@ -233,9 +217,13 @@ func (m Model) updateConfigMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 					}
 				}
 				m.activeTabSession().client = chat.NewProvider(m.cfg.API.Provider, m.cfg.API.BaseURL, m.cfg.API.APIKey, m.cfg.API.Model)
+				m.activeTabSession().providerConfigName = m.cfg.API.Provider
+				m.activeTabSession().apiFormat = m.cfg.API.Provider
 				m.activeTabSession().name = m.cfg.API.Model
 			} else {
 				applyConfigToClient(m.activeTabSession().client, m.cfg)
+				m.activeTabSession().providerConfigName = m.cfg.API.Provider
+				m.activeTabSession().apiFormat = m.cfg.API.Provider
 			}
 			m.theme = ThemeByName(m.cfg.Settings.Theme)
 			if field.Key == "theme" {

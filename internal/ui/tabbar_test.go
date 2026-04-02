@@ -152,6 +152,36 @@ func TestNewTabInheritsCurrentWindowDimensions(t *testing.T) {
 	}
 }
 
+func TestNewTabInheritsCurrentModelBinding(t *testing.T) {
+	cfg := config.DefaultConfig()
+	tab, err := newTabSession(cfg, &stubProvider{model: "test-model"}, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+	tab.providerConfigName = "gateway"
+	tab.apiFormat = "openai-compatible"
+	tab.modelConfigName = "flash"
+
+	m := Model{
+		cfg:       cfg,
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     80,
+		height:    24,
+	}
+
+	m.newTab()
+
+	got := m.tabs[m.activeTab]
+	if got.providerConfigName != "gateway" {
+		t.Fatalf("providerConfigName = %q, want gateway", got.providerConfigName)
+	}
+	if got.modelConfigName != "flash" {
+		t.Fatalf("modelConfigName = %q, want flash", got.modelConfigName)
+	}
+}
+
 func TestMouseClickNewButtonWorksAfterView(t *testing.T) {
 	cfg := config.DefaultConfig()
 	tab, err := newTabSession(cfg, &stubProvider{model: "test-model"}, 80)

@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -403,11 +404,31 @@ func (m *Model) lookupProviderConfig(name string) (config.ProviderEntry, bool) {
 }
 
 func (m *Model) providerFromAssistantSnapshot(msg chat.Message) (chat.Provider, error) {
+	if !msg.HasGenerationSnapshot() {
+		return nil, fmt.Errorf("missing generation snapshot")
+	}
 	entry, ok := m.lookupProviderConfig(msg.SnapshotProvider)
 	if !ok {
 		return nil, fmt.Errorf("snapshot provider %q not found", msg.SnapshotProvider)
 	}
-	return m.newProviderClient(entry.Provider, entry.BaseURL, entry.APIKey, msg.SnapshotModel), nil
+	if strings.TrimSpace(msg.SnapshotAPIFormat) == "" {
+		return nil, fmt.Errorf("snapshot api_format is missing")
+	}
+	return m.newProviderClient(msg.SnapshotAPIFormat, entry.BaseURL, entry.APIKey, msg.SnapshotModel), nil
+}
+
+func (m *Model) currentTabGenerationClient() (chat.Provider, string, string, string, string, string, error) {
+	tab := m.activeTabSession()
+	if tab == nil {
+		return nil, "", "", "", "", "", fmt.Errorf("no active tab")
+	}
+	provider, model, err := m.resolveCurrentTabModelSelection(tab)
+	if err != nil {
+		return nil, "", "", "", "", "", err
+	}
+	roleName := m.activeRole
+	rolePrompt := tab.history.SystemPrompt()
+	return m.newProviderClient(model.APIFormat, provider.BaseURL, provider.APIKey, model.Model), provider.Name, model.Model, model.APIFormat, roleName, rolePrompt, nil
 }
 
 func (m Model) regenerateAssistantVersionContent(turn browseTurn, target chat.Message, editedContent string) (string, error) {
@@ -436,17 +457,38 @@ func (m Model) regeneratePreviewVersion() (Model, tea.Cmd) {
 		return m, nil
 	}
 	target := turn.AssistantVersions[turn.PreviewVersion]
-	if !target.HasGenerationSnapshot() {
-		m.statusMsg = "Legacy version cannot be regenerated"
-		return m, nil
-	}
 
-	content, err := m.regenerateAssistantVersionContent(*turn, target, turn.User.Content)
+	client, snapshotProvider, snapshotModel, snapshotAPIFormat, snapshotRoleName, snapshotRolePrompt, err := m.currentTabGenerationClient()
 	if err != nil {
 		m.statusMsg = "Regenerate failed: " + err.Error()
 		return m, nil
 	}
-	if err := m.store.UpdateMessageContent(target.ID, content); err != nil {
+	temp, maxTokens, reasoningEffort, budgetTokens := m.generationParametersForTab(m.activeTabSession())
+
+	apiMessages := m.buildTurnRegenerationMessages(*turn, turn.User.Content, snapshotRolePrompt)
+	chunks, errs := client.SendStreamChan(
+		context.Background(),
+		apiMessages,
+		temp,
+		maxTokens,
+		reasoningEffort,
+		budgetTokens,
+	)
+	if chunks == nil || errs == nil {
+		m.statusMsg = "Regenerate failed: provider returned no stream"
+		return m, nil
+	}
+
+	content := collectAssistantResponseOrError(chunks, errs)
+	if err := m.store.UpdateAssistantMessage(target.ID, chat.Message{
+		Role:               "assistant",
+		Content:            content,
+		SnapshotProvider:   snapshotProvider,
+		SnapshotModel:      snapshotModel,
+		SnapshotAPIFormat:  snapshotAPIFormat,
+		SnapshotRoleName:   snapshotRoleName,
+		SnapshotRolePrompt: snapshotRolePrompt,
+	}); err != nil {
 		m.statusMsg = "Update failed: " + err.Error()
 		return m, nil
 	}
@@ -460,18 +502,24 @@ func (m Model) regeneratePreviewVersion() (Model, tea.Cmd) {
 
 func (m Model) appendAssistantVersionFromSelection(provider config.ProviderEntry, model config.ModelEntry) (Model, tea.Cmd) {
 	turn := m.currentBrowseTurn()
-	client := m.newProviderClient(provider.Provider, provider.BaseURL, provider.APIKey, model.Model)
+	if err := validateGenerationModelEntry(model); err != nil {
+		m.statusMsg = "New version failed: " + err.Error()
+		m.mode = modeMessageBrowse
+		return m, nil
+	}
+	client := m.newProviderClient(model.APIFormat, provider.BaseURL, provider.APIKey, model.Model)
 	rolePrompt := m.tabs[m.activeTab].history.SystemPrompt()
 	roleName := m.activeRole
 
 	apiMessages := m.buildTurnRegenerationMessages(*turn, turn.User.Content, rolePrompt)
+	temp, maxTokens, reasoningEffort, budgetTokens := m.parametersForModelEntry(model)
 	chunks, errs := client.SendStreamChan(
 		context.Background(),
 		apiMessages,
-		m.cfg.Parameters.Temperature,
-		m.cfg.Parameters.MaxTokens,
-		m.cfg.Parameters.ReasoningEffort,
-		m.cfg.Parameters.BudgetTokens,
+		temp,
+		maxTokens,
+		reasoningEffort,
+		budgetTokens,
 	)
 	if chunks == nil || errs == nil {
 		m.statusMsg = "New version failed: provider returned no stream"
@@ -486,6 +534,7 @@ func (m Model) appendAssistantVersionFromSelection(provider config.ProviderEntry
 		VersionNumber:      len(turn.AssistantVersions) + 1,
 		SnapshotProvider:   provider.Name,
 		SnapshotModel:      model.Model,
+		SnapshotAPIFormat:  model.APIFormat,
 		SnapshotRoleName:   roleName,
 		SnapshotRolePrompt: rolePrompt,
 	}
@@ -526,8 +575,22 @@ func assistantVersionTitle(prefix string, msg chat.Message) string {
 	if prefix != "" {
 		title = prefix + " " + title
 	}
+	if msg.StaleAfterUserEdit {
+		title += " [stale]"
+	}
 	if msg.SnapshotProvider != "" || msg.SnapshotModel != "" {
 		title += fmt.Sprintf(" %s / %s", msg.SnapshotProvider, msg.SnapshotModel)
+	}
+	return title
+}
+
+func browseUserTitle(turn browseTurn, editMode bool) string {
+	title := "User"
+	if editMode {
+		return title + " [editing]"
+	}
+	if turn.User.EditedAfterGeneration {
+		title += " [edited]"
 	}
 	return title
 }
@@ -658,13 +721,6 @@ func (m Model) confirmOrRegenerateEditedTurn() (Model, tea.Cmd) {
 	}
 
 	for _, assistant := range turn.AssistantVersions {
-		if !assistant.HasGenerationSnapshot() {
-			m.statusMsg = "Turn contains legacy versions that cannot be regenerated"
-			m.messageBrowse.pendingConfirm = browseConfirmState{kind: confirmNone}
-			m.messageBrowse.editMode = false
-			return m, nil
-		}
-
 		content, err := m.regenerateAssistantVersionContent(*turn, assistant, editedContent)
 		if err != nil {
 			m.statusMsg = "Regenerate failed: " + err.Error()
@@ -723,8 +779,51 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
+	if m.messageBrowse.editMode {
+		switch msg.String() {
+		case "esc":
+			m.messageBrowse.editMode = false
+			m.messageBrowse.editBuffer = ""
+			m.messageBrowse.editDirty = false
+			return m, nil
+		case "backspace", "ctrl+h":
+			if m.messageBrowse.editBuffer != "" {
+				_, size := utf8.DecodeLastRuneInString(m.messageBrowse.editBuffer)
+				if size > 0 {
+					m.messageBrowse.editBuffer = m.messageBrowse.editBuffer[:len(m.messageBrowse.editBuffer)-size]
+				}
+			}
+			m.messageBrowse.editDirty = m.messageBrowse.editBuffer != m.currentBrowseTurn().User.Content
+			return m, nil
+		case "enter":
+			changed := m.messageBrowse.editBuffer != m.currentBrowseTurn().User.Content
+			if !changed {
+				m.messageBrowse.editMode = false
+				m.messageBrowse.editBuffer = ""
+				m.messageBrowse.editDirty = false
+				return m, nil
+			}
+			m.messageBrowse.editDirty = true
+			m.messageBrowse.pendingConfirm = browseConfirmState{
+				kind:   confirmEditRegenerate,
+				cursor: 0,
+			}
+			return m, nil
+		default:
+			if len(msg.Runes) > 0 {
+				m.messageBrowse.editBuffer += string(msg.Runes)
+				m.messageBrowse.editDirty = m.messageBrowse.editBuffer != m.currentBrowseTurn().User.Content
+				return m, nil
+			}
+		}
+	}
+
 	switch msg.String() {
 	case "esc":
+		if m.messageBrowse.mode == browseModeCompare {
+			m.messageBrowse.mode = browseModeMessage
+			return m, nil
+		}
 		m.mode = modeChat
 		m.escCount = 0
 		return m, nil
@@ -766,6 +865,10 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case "v":
+		if m.messageBrowse.mode == browseModeCompare {
+			m.messageBrowse.mode = browseModeMessage
+			return m, nil
+		}
 		if len(m.messageBrowse.turns) > 0 && m.currentBrowseTurn().VersionCount() > 1 {
 			m.messageBrowse.mode = browseModeCompare
 			m.messageBrowse.compareCardIdx = m.currentBrowseTurn().PreviewVersion
@@ -792,14 +895,6 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case "enter":
-		// If in edit mode, open confirmation dialog
-		if m.messageBrowse.editMode {
-			m.messageBrowse.pendingConfirm = browseConfirmState{
-				kind:   confirmEditRegenerate,
-				cursor: 0,
-			}
-			return m, nil
-		}
 		// Old rollback logic - only if not in browse mode with turns
 		if len(m.messageBrowse.turns) > 0 {
 			return m.confirmOrApplyPreview()
@@ -842,7 +937,7 @@ func (m Model) updateMessageBrowse(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) viewMessageBrowse() string {
 	tabBar := (&m).renderTabBar()
 	tab := m.activeTabSession()
-	help := renderBrowseHelp(m.messageBrowse.mode, m.width, m.theme)
+	help := renderBrowseHelp(m.messageBrowse.mode, m.messageBrowse.editMode, m.width, m.theme)
 	confirm := m.renderBrowseConfirm()
 	statusBar := m.renderStatusBar()
 
@@ -913,7 +1008,10 @@ func (m Model) viewMessageBrowse() string {
 		if turn.User.Deleted {
 			leftContent = ""
 		}
-		left := renderBrowsePane("User", leftContent, m.messageBrowse.leftScroll, paneWidth, bodyHeight, m.theme)
+		if m.messageBrowse.editMode {
+			leftContent = m.messageBrowse.editBuffer + "█"
+		}
+		left := renderBrowsePane(browseUserTitle(turn, m.messageBrowse.editMode), leftContent, m.messageBrowse.leftScroll, paneWidth, bodyHeight, m.theme)
 
 		// Render right pane (Assistant with version)
 		var right string
@@ -1013,16 +1111,25 @@ func renderBrowsePane(title, content string, scroll, width, height int, theme Th
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderBrowseHelp(mode browseMode, width int, theme Theme) string {
+func renderBrowseHelp(mode browseMode, editMode bool, width int, theme Theme) string {
 	var items []string
-	if mode == browseModeCompare {
+	if editMode {
+		items = []string{
+			"type: edit user",
+			"Enter: confirm",
+			"Esc: cancel edit",
+		}
+	} else if mode == browseModeCompare {
 		items = []string{
 			"↑↓: scroll",
 			"←→: card",
 			"Enter: apply",
+			"g: new version",
+			"r: regenerate",
 			"d: delete",
 			"u: undo",
 			"b: branch",
+			"c: copy",
 			"v: message",
 			"Esc: back",
 		}
@@ -1031,16 +1138,19 @@ func renderBrowseHelp(mode browseMode, width int, theme Theme) string {
 			"↑↓: turn",
 			"←→: version",
 			"Enter: apply",
+			"g: new version",
 			"e: edit",
+			"r: regenerate",
 			"d: delete",
 			"u: undo",
 			"b: branch",
+			"c: copy",
 			"v: compare",
 			"Esc: back",
 		}
 	}
 
-	lines := packPlainLines(items, width, 2)
+	lines := packPlainLines(items, width, 3)
 	for i, line := range lines {
 		lines[i] = theme.ConfigHelpStyle().Render(line)
 	}

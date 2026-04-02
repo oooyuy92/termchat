@@ -39,13 +39,12 @@ func TestSaveAndLoadModelRegistry(t *testing.T) {
 	want := ModelRegistry{
 		Providers: []ProviderEntry{
 			{
-				Name:     "gateway",
-				Provider: "openai-compatible",
-				BaseURL:  "https://example.test/v1",
-				APIKey:   "secret",
+				Name:    "gateway",
+				BaseURL: "https://example.test/v1",
+				APIKey:  "secret",
 				Models: []ModelEntry{
-					{Name: "flash", Model: "gemini-3-flash-preview"},
-					{Name: "pro", Model: "gemini-3.1-pro-preview"},
+					{Name: "flash", Model: "gemini-3-flash-preview", APIFormat: "gemini"},
+					{Name: "pro", Model: "gemini-3.1-pro-preview", APIFormat: "gemini"},
 				},
 			},
 		},
@@ -66,5 +65,59 @@ func TestSaveAndLoadModelRegistry(t *testing.T) {
 	}
 	if got.Providers[0].Models[1].Model != "gemini-3.1-pro-preview" {
 		t.Fatalf("model = %q, want gemini-3.1-pro-preview", got.Providers[0].Models[1].Model)
+	}
+	if got.Providers[0].Models[1].APIFormat != "gemini" {
+		t.Fatalf("APIFormat = %q, want gemini", got.Providers[0].Models[1].APIFormat)
+	}
+}
+
+func TestSaveAndLoadModelRegistryPreservesModelParameters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "models.yaml")
+	want := ModelRegistry{
+		Providers: []ProviderEntry{
+			{
+				Name:    "gateway",
+				BaseURL: "https://example.test/v1",
+				APIKey:  "secret",
+				Models: []ModelEntry{
+					{
+						Name:            "flash",
+						Model:           "gemini-3-flash-preview",
+						APIFormat:       "gemini",
+						Temperature:     0.4,
+						MaxTokens:       8192,
+						ReasoningEffort: "medium",
+						BudgetTokens:    2048,
+					},
+				},
+			},
+		},
+	}
+
+	if err := SaveModelRegistry(path, want); err != nil {
+		t.Fatalf("SaveModelRegistry() error = %v", err)
+	}
+
+	got, missing, err := LoadModelRegistryOrDefault(path)
+	if err != nil {
+		t.Fatalf("LoadModelRegistryOrDefault() error = %v", err)
+	}
+	if missing {
+		t.Fatalf("missing = true, want false")
+	}
+	if got.Providers[0].Models[0].Temperature != 0.4 {
+		t.Fatalf("Temperature = %f, want 0.4", got.Providers[0].Models[0].Temperature)
+	}
+	if got.Providers[0].Models[0].MaxTokens != 8192 {
+		t.Fatalf("MaxTokens = %d, want 8192", got.Providers[0].Models[0].MaxTokens)
+	}
+	if got.Providers[0].Models[0].ReasoningEffort != "medium" {
+		t.Fatalf("ReasoningEffort = %q, want medium", got.Providers[0].Models[0].ReasoningEffort)
+	}
+	if got.Providers[0].Models[0].BudgetTokens != 2048 {
+		t.Fatalf("BudgetTokens = %d, want 2048", got.Providers[0].Models[0].BudgetTokens)
+	}
+	if got.Providers[0].Models[0].APIFormat != "gemini" {
+		t.Fatalf("APIFormat = %q, want gemini", got.Providers[0].Models[0].APIFormat)
 	}
 }

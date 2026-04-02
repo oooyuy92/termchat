@@ -14,12 +14,20 @@ import (
 
 type streamingStubProvider struct {
 	stubProvider
-	response string
-	received []chat.Message
+	response          string
+	received          []chat.Message
+	temperature       float64
+	maxTokens         int
+	reasoningEffort   string
+	budgetTokens      int
 }
 
-func (s *streamingStubProvider) SendStreamChan(_ context.Context, messages []chat.Message, _ float64, _ int, _ string, _ int) (<-chan chat.StreamChunk, <-chan error) {
+func (s *streamingStubProvider) SendStreamChan(_ context.Context, messages []chat.Message, temperature float64, maxTokens int, reasoningEffort string, budgetTokens int) (<-chan chat.StreamChunk, <-chan error) {
 	s.received = append([]chat.Message(nil), messages...)
+	s.temperature = temperature
+	s.maxTokens = maxTokens
+	s.reasoningEffort = reasoningEffort
+	s.budgetTokens = budgetTokens
 
 	chunks := make(chan chat.StreamChunk, 1)
 	errs := make(chan error, 1)
@@ -100,9 +108,11 @@ func seedConversation(t *testing.T, store *storage.Store, name string, turns []s
 		if len(turn.assistant) > 0 {
 			// First version: append as regular message, then init version group
 			firstMsg := chat.Message{
-				Role:    "assistant",
-				Content: turn.assistant[0],
-				Seq:     seq,
+				Role:             "assistant",
+				Content:          turn.assistant[0],
+				Seq:              seq,
+				SnapshotProvider: "openai-compatible",
+				SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible",
 			}
 			firstID, err := store.AppendMessage(name, firstMsg)
 			if err != nil {
@@ -117,10 +127,12 @@ func seedConversation(t *testing.T, store *storage.Store, name string, turns []s
 			// Add additional versions
 			for i := 1; i < len(turn.assistant); i++ {
 				assistantMsg := chat.Message{
-					Role:          "assistant",
-					Content:       turn.assistant[i],
-					Seq:           seq,
-					VersionNumber: i + 1,
+					Role:             "assistant",
+					Content:          turn.assistant[i],
+					Seq:              seq,
+					VersionNumber:    i + 1,
+					SnapshotProvider: "openai-compatible",
+					SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible",
 				}
 				if _, err := store.AppendAssistantVersion(name, firstID, assistantMsg); err != nil {
 					t.Fatalf("AppendAssistantVersion(%q) error = %v", turn.assistant[i], err)
@@ -179,8 +191,8 @@ func newVersionedBrowseModel(t *testing.T) Model {
 		{
 			User: chat.Message{ID: 1, Seq: 1, Role: "user", Content: "q1"},
 			AssistantVersions: []chat.Message{
-				{ID: 2, Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: 2, VersionNumber: 1, TotalVersions: 2},
-				{ID: 3, Seq: 1, Role: "assistant", Content: "v2", VersionGroupID: 2, VersionNumber: 2, TotalVersions: 2},
+				{ID: 2, Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: 2, VersionNumber: 1, TotalVersions: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"},
+				{ID: 3, Seq: 1, Role: "assistant", Content: "v2", VersionGroupID: 2, VersionNumber: 2, TotalVersions: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"},
 			},
 			ActiveVersion:  0,
 			PreviewVersion: 0,
@@ -188,7 +200,7 @@ func newVersionedBrowseModel(t *testing.T) Model {
 		{
 			User: chat.Message{ID: 4, Seq: 2, Role: "user", Content: "q2"},
 			AssistantVersions: []chat.Message{
-				{ID: 5, Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, TotalVersions: 1},
+				{ID: 5, Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, TotalVersions: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"},
 			},
 			ActiveVersion:  0,
 			PreviewVersion: 0,
@@ -245,11 +257,11 @@ func newEditableBrowseModel(t *testing.T) Model {
 	// Seed conversation with messages
 	name := "conv"
 	userID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
-	assistantID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	assistantID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	_ = store.InitVersionGroup(assistantID)
-	_, _ = store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2})
+	_, _ = store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	user2ID, _ := store.AppendMessage(name, chat.Message{Seq: 2, Role: "user", Content: "q2"})
-	assistant2ID, _ := store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1})
+	assistant2ID, _ := store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 
 	m.tabs[0].autoSaveName = name
 
@@ -258,8 +270,8 @@ func newEditableBrowseModel(t *testing.T) Model {
 		{
 			User: chat.Message{ID: userID, Seq: 1, Role: "user", Content: "q1"},
 			AssistantVersions: []chat.Message{
-				{ID: assistantID, Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: assistantID, VersionNumber: 1, TotalVersions: 2},
-				{ID: assistantID + 1, Seq: 1, Role: "assistant", Content: "v2", VersionGroupID: assistantID, VersionNumber: 2, TotalVersions: 2},
+				{ID: assistantID, Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: assistantID, VersionNumber: 1, TotalVersions: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"},
+				{ID: assistantID + 1, Seq: 1, Role: "assistant", Content: "v2", VersionGroupID: assistantID, VersionNumber: 2, TotalVersions: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"},
 			},
 			ActiveVersion:  0,
 			PreviewVersion: 0,
@@ -267,7 +279,7 @@ func newEditableBrowseModel(t *testing.T) Model {
 		{
 			User: chat.Message{ID: user2ID, Seq: 2, Role: "user", Content: "q2"},
 			AssistantVersions: []chat.Message{
-				{ID: assistant2ID, Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, TotalVersions: 1},
+				{ID: assistant2ID, Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, TotalVersions: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"},
 			},
 			ActiveVersion:  0,
 			PreviewVersion: 0,
@@ -307,14 +319,14 @@ func TestMessageBrowse_DeleteActiveVersionPromotesNearestRemainingVersion(t *tes
 	if err != nil {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
-	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(v1) error = %v", err)
 	}
 	if err := store.InitVersionGroup(assistantID); err != nil {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
-	_, err = store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2})
+	_, err = store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
 	}
@@ -346,9 +358,9 @@ func TestMessageBrowse_BranchUsesPreviewVersionWhenConfirmed(t *testing.T) {
 	m := newBrowserTestModel(t, store)
 	seedConversationLegacy(t, store, "conv", []chat.Message{
 		{Seq: 1, Role: "user", Content: "q1"},
-		{Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: 2, VersionNumber: 1},
+		{Seq: 1, Role: "assistant", Content: "v1", VersionGroupID: 2, VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"},
 		{Seq: 2, Role: "user", Content: "q2"},
-		{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1},
+		{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"},
 	})
 	m.tabs[0].autoSaveName = "conv"
 	m.messageBrowse = newVersionedBrowseModel(t).messageBrowse
@@ -502,14 +514,14 @@ func TestMessageBrowse_DeletePersistsToStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
-	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(v1) error = %v", err)
 	}
 	if err := store.InitVersionGroup(assistantID); err != nil {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
-	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2})
+	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
 	}
@@ -552,7 +564,7 @@ func TestMessageBrowse_DeleteAssistantRemovesPreviewVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
-	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(v1) error = %v", err)
 	}
@@ -560,10 +572,12 @@ func TestMessageBrowse_DeleteAssistantRemovesPreviewVersion(t *testing.T) {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
 	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{
-		Seq:           1,
-		Role:          "assistant",
-		Content:       "v2",
-		VersionNumber: 2,
+		Seq:              1,
+		Role:             "assistant",
+		Content:          "v2",
+		VersionNumber:    2,
+		SnapshotProvider: "openai-compatible",
+		SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible",
 	})
 	if err != nil {
 		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
@@ -618,7 +632,7 @@ func TestMessageBrowse_DeleteLastAssistantKeepsEmptyTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
-	_, err = store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	_, err = store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(v1) error = %v", err)
 	}
@@ -690,14 +704,14 @@ func TestMessageBrowse_BranchReloadsFreshMessageIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
-	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(v1) error = %v", err)
 	}
 	if err := store.InitVersionGroup(assistantID); err != nil {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
-	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2})
+	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
 	}
@@ -705,7 +719,7 @@ func TestMessageBrowse_BranchReloadsFreshMessageIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendMessage(user2) error = %v", err)
 	}
-	_, err = store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1})
+	_, err = store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(a2) error = %v", err)
 	}
@@ -764,25 +778,24 @@ func TestMessageBrowse_RegenerateEditedTurnPersistsAndClearsFlags(t *testing.T) 
 		activeTab: 0,
 		width:     80,
 		height:    24,
-		providerFactory: func(providerType, baseURL, apiKey, model string) chat.Provider {
+		providerFactory: func(apiFormat, baseURL, apiKey, model string) chat.Provider {
 			return provider
 		},
 		modelRegistry: config.ModelRegistry{
-			Providers: []config.ProviderEntry{
-				{
-					Name:     "test-provider",
-					Provider: "openai-compatible",
-					BaseURL:  "https://example.test/v1",
-					APIKey:   "k",
-					Models:   []config.ModelEntry{{Name: "test-model", Model: "test-model"}},
+				Providers: []config.ProviderEntry{
+					{
+						Name:    "test-provider",
+						BaseURL: "https://example.test/v1",
+						APIKey:  "k",
+						Models:  []config.ModelEntry{{Name: "test-model", Model: "test-model", APIFormat: "openai-compatible"}},
+					},
 				},
-			},
 		},
 	}
 
 	seedConversationLegacy(t, store, "conv", []chat.Message{
 		{Seq: 1, Role: "user", Content: "old question"},
-		{Seq: 1, Role: "assistant", Content: "old answer", VersionNumber: 1, SnapshotProvider: "test-provider", SnapshotModel: "test-model", SnapshotRoleName: "writer", SnapshotRolePrompt: "system prompt"},
+		{Seq: 1, Role: "assistant", Content: "old answer", VersionNumber: 1, SnapshotProvider: "test-provider", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible", SnapshotRoleName: "writer", SnapshotRolePrompt: "system prompt"},
 	})
 
 	m.tabs[0].autoSaveName = "conv"
@@ -833,6 +846,18 @@ func TestMessageBrowse_RegenerateEditedTurnPersistsAndClearsFlags(t *testing.T) 
 func TestStreamErrorPersistsAsAssistantMessageBrowsableAndDeletable(t *testing.T) {
 	store := newBrowserTestStore(t)
 	m := newBrowserTestModel(t, store)
+	m.modelRegistry = config.ModelRegistry{
+		Providers: []config.ProviderEntry{
+			{
+				Name:    "gateway",
+				BaseURL: "https://example.test/v1",
+				APIKey:  "secret",
+				Models: []config.ModelEntry{
+					{Name: "flash", Model: "test-model", APIFormat: "openai-compatible", Temperature: 0.25, MaxTokens: 4096},
+				},
+			},
+		},
+	}
 
 	const name = "conv"
 	userID, err := store.AppendMessage(name, chat.Message{
@@ -845,6 +870,9 @@ func TestStreamErrorPersistsAsAssistantMessageBrowsableAndDeletable(t *testing.T
 	}
 
 	m.tabs[0].autoSaveName = name
+	m.tabs[0].providerConfigName = "gateway"
+	m.tabs[0].modelConfigName = "flash"
+	m.tabs[0].apiFormat = "openai-compatible"
 	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
 	m.tabs[0].streaming = true
 
@@ -886,7 +914,86 @@ func TestStreamErrorPersistsAsAssistantMessageBrowsableAndDeletable(t *testing.T
 	}
 }
 
-func TestMessageBrowse_RegenerateCurrentPreviewVersionUsesStoredSnapshot(t *testing.T) {
+func TestStreamDonePersistsAssistantSnapshotFromBoundModel(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+	m.modelRegistry = config.ModelRegistry{
+		Providers: []config.ProviderEntry{
+			{
+				Name:    "gateway",
+				BaseURL: "https://example.test/v1",
+				APIKey:  "k",
+				Models: []config.ModelEntry{
+					{Name: "flash", Model: "test-model", APIFormat: "openai-compatible", Temperature: 0.2, MaxTokens: 4096},
+				},
+			},
+		},
+	}
+	m.tabs[0].history.SetSystemPrompt("")
+	m.tabs[0].autoSaveName = "conv"
+	m.tabs[0].providerConfigName = "gateway"
+	m.tabs[0].modelConfigName = "flash"
+	m.tabs[0].apiFormat = "openai-compatible"
+	m.activeRole = ""
+
+	userID, err := store.AppendMessage("conv", chat.Message{
+		Seq:     1,
+		Role:    "user",
+		Content: "q1",
+	})
+	if err != nil {
+		t.Fatalf("AppendMessage(user) error = %v", err)
+	}
+	m.tabs[0].history.ReplaceMessages([]chat.Message{{ID: userID, Seq: 1, Role: "user", Content: "q1"}})
+	m.tabs[0].currentResp = "a1"
+
+	next, _ := m.Update(streamDoneMsg{TabIdx: 0})
+	m = next.(Model)
+
+	reloaded := mustLoadActiveTimeline(t, store, "conv")
+	if len(reloaded) != 2 {
+		t.Fatalf("active timeline len = %d, want 2", len(reloaded))
+	}
+	if got := reloaded[1].SnapshotProvider; got != "gateway" {
+		t.Fatalf("SnapshotProvider = %q, want gateway", got)
+	}
+	if got := reloaded[1].SnapshotModel; got != "test-model" {
+		t.Fatalf("SnapshotModel = %q, want test-model", got)
+	}
+	if !reloaded[1].HasGenerationSnapshot() {
+		t.Fatalf("HasGenerationSnapshot = false, want true")
+	}
+}
+
+func TestMessageBrowse_RegeneratePreviewRequiresRegisteredCurrentTabProvider(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+
+	const name = "conv"
+	seedConversationLegacy(t, store, name, []chat.Message{
+		{Seq: 1, Role: "user", Content: "q1"},
+		{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "test-model", SnapshotAPIFormat: "openai-compatible", SnapshotRolePrompt: ""},
+	})
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	reloaded := mustLoadActiveTimeline(t, store, name)
+	if got := reloaded[1].Content; got != "v1" {
+		t.Fatalf("assistant content = %q, want unchanged v1", got)
+	}
+	if got := m.statusMsg; got != `Regenerate failed: current session provider "openai-compatible" not found` {
+		t.Fatalf("statusMsg = %q, want current session provider error", got)
+	}
+}
+
+func TestMessageBrowse_RegenerateCurrentPreviewVersionUsesCurrentTabModelAndUpdatesSnapshot(t *testing.T) {
 	store := newBrowserTestStore(t)
 	tab, err := newTabSession(config.DefaultConfig(), &stubProvider{model: "live-model"}, 80)
 	if err != nil {
@@ -901,20 +1008,102 @@ func TestMessageBrowse_RegenerateCurrentPreviewVersionUsesStoredSnapshot(t *test
 		activeTab: 0,
 		width:     80,
 		height:    24,
-		providerFactory: func(providerType, baseURL, apiKey, model string) chat.Provider {
+		providerFactory: func(apiFormat, baseURL, apiKey, model string) chat.Provider {
+			if apiFormat != "openai-compatible" {
+				t.Fatalf("apiFormat = %q, want openai-compatible", apiFormat)
+			}
+			if baseURL != "https://gateway.example/v1" {
+				t.Fatalf("baseURL = %q, want https://gateway.example/v1", baseURL)
+			}
+			if apiKey != "gateway-key" {
+				t.Fatalf("apiKey = %q, want gateway-key", apiKey)
+			}
+			if model != "live-model" {
+				t.Fatalf("model = %q, want live-model", model)
+			}
 			return &streamingStubProvider{
 				stubProvider: stubProvider{model: model},
-				response:     "rewritten by snapshot",
+				response:     "rewritten by current tab model",
 			}
 		},
 		modelRegistry: config.ModelRegistry{
+				Providers: []config.ProviderEntry{
+					{
+						Name:    "gateway",
+						BaseURL: "https://gateway.example/v1",
+						APIKey:  "gateway-key",
+						Models:  []config.ModelEntry{{Name: "live", Model: "live-model", APIFormat: "openai-compatible", Temperature: 0.3, MaxTokens: 4096}},
+					},
+					{
+						Name:    "anthropic-direct",
+						BaseURL: "https://api.anthropic.com",
+						APIKey:  "k",
+						Models:  []config.ModelEntry{{Name: "sonnet", Model: "claude-sonnet-4", APIFormat: "anthropic"}},
+					},
+				},
+		},
+	}
+
+	const name = "conv"
+	seedConversationLegacy(t, store, name, []chat.Message{
+		{Seq: 1, Role: "user", Content: "q1"},
+		{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "anthropic-direct", SnapshotModel: "claude-sonnet-4", SnapshotAPIFormat: "anthropic", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
+	})
+
+	m.tabs[0].autoSaveName = name
+	m.tabs[0].providerConfigName = "gateway"
+	m.tabs[0].modelConfigName = "live"
+	m.tabs[0].apiFormat = "openai-compatible"
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
+	m.tabs[0].history.SetSystemPrompt("new prompt")
+	m.activeRole = "reviewer"
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	reloaded := mustLoadActiveTimeline(t, store, name)
+	if got := reloaded[1].Content; got != "rewritten by current tab model" {
+		t.Fatalf("assistant content = %q, want rewritten by current tab model", got)
+	}
+	if got := reloaded[1].SnapshotProvider; got != "gateway" {
+		t.Fatalf("SnapshotProvider = %q, want gateway", got)
+	}
+	if got := reloaded[1].SnapshotModel; got != "live-model" {
+		t.Fatalf("SnapshotModel = %q, want live-model", got)
+	}
+	if got := reloaded[1].SnapshotRoleName; got != "reviewer" {
+		t.Fatalf("SnapshotRoleName = %q, want reviewer", got)
+	}
+	if got := reloaded[1].SnapshotRolePrompt; got != "new prompt" {
+		t.Fatalf("SnapshotRolePrompt = %q, want new prompt", got)
+	}
+}
+
+func TestMessageBrowse_RegenerateCurrentPreviewVersionRequiresExactTabModelBinding(t *testing.T) {
+	store := newBrowserTestStore(t)
+	tab, err := newTabSession(config.DefaultConfig(), &stubProvider{model: "live-model"}, 80)
+	if err != nil {
+		t.Fatalf("newTabSession() error = %v", err)
+	}
+
+	m := Model{
+		cfg:       config.DefaultConfig(),
+		store:     store,
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     80,
+		height:    24,
+		modelRegistry: config.ModelRegistry{
 			Providers: []config.ProviderEntry{
 				{
-					Name:     "anthropic-direct",
-					Provider: "anthropic",
-					BaseURL:  "https://api.anthropic.com",
-					APIKey:   "k",
-					Models:   []config.ModelEntry{{Name: "sonnet", Model: "claude-sonnet-4"}},
+					Name:    "gateway",
+					BaseURL: "https://gateway.example/v1",
+					APIKey:  "gateway-key",
+					Models:  []config.ModelEntry{{Name: "live", Model: "live-model", APIFormat: "openai-compatible", Temperature: 0.3, MaxTokens: 4096}},
 				},
 			},
 		},
@@ -923,10 +1112,13 @@ func TestMessageBrowse_RegenerateCurrentPreviewVersionUsesStoredSnapshot(t *test
 	const name = "conv"
 	seedConversationLegacy(t, store, name, []chat.Message{
 		{Seq: 1, Role: "user", Content: "q1"},
-		{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "anthropic-direct", SnapshotModel: "claude-sonnet-4", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
+		{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "gateway", SnapshotModel: "live-model", SnapshotAPIFormat: "openai-compatible"},
 	})
 
 	m.tabs[0].autoSaveName = name
+	m.tabs[0].providerConfigName = "gateway"
+	m.tabs[0].modelConfigName = ""
+	m.tabs[0].apiFormat = "openai-compatible"
 	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, name))
 	if err := m.buildBrowserState(); err != nil {
 		t.Fatalf("buildBrowserState() error = %v", err)
@@ -936,8 +1128,11 @@ func TestMessageBrowse_RegenerateCurrentPreviewVersionUsesStoredSnapshot(t *test
 	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 
 	reloaded := mustLoadActiveTimeline(t, store, name)
-	if got := reloaded[1].Content; got != "rewritten by snapshot" {
-		t.Fatalf("assistant content = %q, want rewritten by snapshot", got)
+	if got := reloaded[1].Content; got != "v1" {
+		t.Fatalf("assistant content = %q, want unchanged v1", got)
+	}
+	if got := m.statusMsg; got != "Regenerate failed: current session model is not selected" {
+		t.Fatalf("statusMsg = %q, want missing model binding error", got)
 	}
 }
 
@@ -957,7 +1152,7 @@ func TestMessageBrowse_EditRegenerateAllVersionsRewritesEachVersionOrError(t *te
 		activeTab: 0,
 		width:     80,
 		height:    24,
-		providerFactory: func(providerType, baseURL, apiKey, model string) chat.Provider {
+		providerFactory: func(apiFormat, baseURL, apiKey, model string) chat.Provider {
 			switch model {
 			case "claude-sonnet-4":
 				return &streamingStubProvider{
@@ -974,30 +1169,28 @@ func TestMessageBrowse_EditRegenerateAllVersionsRewritesEachVersionOrError(t *te
 			}
 		},
 		modelRegistry: config.ModelRegistry{
-			Providers: []config.ProviderEntry{
-				{
-					Name:     "anthropic-direct",
-					Provider: "anthropic",
-					BaseURL:  "https://api.anthropic.com",
-					APIKey:   "k1",
-					Models:   []config.ModelEntry{{Name: "sonnet", Model: "claude-sonnet-4"}},
+				Providers: []config.ProviderEntry{
+					{
+						Name:    "anthropic-direct",
+						BaseURL: "https://api.anthropic.com",
+						APIKey:  "k1",
+						Models:  []config.ModelEntry{{Name: "sonnet", Model: "claude-sonnet-4", APIFormat: "anthropic"}},
+					},
+					{
+						Name:    "gateway",
+						BaseURL: "https://example.test/v1",
+						APIKey:  "k2",
+						Models:  []config.ModelEntry{{Name: "flash", Model: "gemini-3-flash-preview", APIFormat: "openai-compatible"}},
+					},
 				},
-				{
-					Name:     "gateway",
-					Provider: "openai-compatible",
-					BaseURL:  "https://example.test/v1",
-					APIKey:   "k2",
-					Models:   []config.ModelEntry{{Name: "flash", Model: "gemini-3-flash-preview"}},
-				},
-			},
 		},
 	}
 
 	const name = "conv"
 	seedConversationLegacy(t, store, name, []chat.Message{
 		{Seq: 1, Role: "user", Content: "old question"},
-		{Seq: 1, Role: "assistant", Content: "old a", VersionNumber: 1, SnapshotProvider: "anthropic-direct", SnapshotModel: "claude-sonnet-4", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
-		{Seq: 1, Role: "assistant", Content: "old b", VersionNumber: 2, SnapshotProvider: "gateway", SnapshotModel: "gemini-3-flash-preview", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
+		{Seq: 1, Role: "assistant", Content: "old a", VersionNumber: 1, SnapshotProvider: "anthropic-direct", SnapshotModel: "claude-sonnet-4", SnapshotAPIFormat: "anthropic", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
+		{Seq: 1, Role: "assistant", Content: "old b", VersionNumber: 2, SnapshotProvider: "gateway", SnapshotModel:      "gemini-3-flash-preview", SnapshotAPIFormat:  "openai-compatible", SnapshotRoleName: "writer", SnapshotRolePrompt: "be concise"},
 	})
 
 	m.tabs[0].autoSaveName = name
@@ -1029,10 +1222,74 @@ func TestMessageBrowse_EditRegenerateAllVersionsRewritesEachVersionOrError(t *te
 	}
 }
 
+func TestMessageBrowse_NewVersionUsesSelectedModelParametersWithoutChangingTabBinding(t *testing.T) {
+	store := newBrowserTestStore(t)
+	m := newBrowserTestModel(t, store)
+	seedConversation(t, store, "conv", []seedTurn{
+		{user: "q1", assistant: []string{"a1"}},
+	})
+
+	m.tabs[0].autoSaveName = "conv"
+	m.tabs[0].providerConfigName = "default-gateway"
+	m.tabs[0].modelConfigName = "default-model"
+	m.tabs[0].history.ReplaceMessages(mustLoadActiveTimeline(t, store, "conv"))
+	if err := m.buildBrowserState(); err != nil {
+		t.Fatalf("buildBrowserState() error = %v", err)
+	}
+
+	var provider *streamingStubProvider
+	m.providerFactory = func(apiFormat, baseURL, apiKey, model string) chat.Provider {
+		provider = &streamingStubProvider{
+			stubProvider: stubProvider{model: model},
+			response:     "new version",
+		}
+		return provider
+	}
+
+	selectedProvider := config.ProviderEntry{
+		Name:    "gateway",
+		BaseURL: "https://example.test/v1",
+		APIKey:  "secret",
+	}
+	selectedModel := config.ModelEntry{
+		Name:            "flash",
+		Model:           "gemini-3-flash-preview",
+		APIFormat:       "openai-compatible",
+		Temperature:     0.15,
+		MaxTokens:       4096,
+		ReasoningEffort: "low",
+		BudgetTokens:    256,
+	}
+
+	m, _ = m.appendAssistantVersionFromSelection(selectedProvider, selectedModel)
+
+	if provider == nil {
+		t.Fatal("providerFactory was not called")
+	}
+	if provider.temperature != 0.15 {
+		t.Fatalf("temperature = %f, want 0.15", provider.temperature)
+	}
+	if provider.maxTokens != 4096 {
+		t.Fatalf("maxTokens = %d, want 4096", provider.maxTokens)
+	}
+	if provider.reasoningEffort != "low" {
+		t.Fatalf("reasoningEffort = %q, want low", provider.reasoningEffort)
+	}
+	if provider.budgetTokens != 256 {
+		t.Fatalf("budgetTokens = %d, want 256", provider.budgetTokens)
+	}
+	if got := m.tabs[0].providerConfigName; got != "default-gateway" {
+		t.Fatalf("providerConfigName = %q, want default-gateway", got)
+	}
+	if got := m.tabs[0].modelConfigName; got != "default-model" {
+		t.Fatalf("modelConfigName = %q, want default-model", got)
+	}
+}
+
 func TestMessageBrowse_GCreatesAssistantVersionFromSelectedRegistryModel(t *testing.T) {
 	store := newBrowserTestStore(t)
 	m := newBrowserTestModel(t, store)
-	m.providerFactory = func(providerType, baseURL, apiKey, model string) chat.Provider {
+	m.providerFactory = func(apiFormat, baseURL, apiKey, model string) chat.Provider {
 		return &streamingStubProvider{
 			stubProvider: stubProvider{model: model},
 			response:     "new version from registry",
@@ -1041,12 +1298,11 @@ func TestMessageBrowse_GCreatesAssistantVersionFromSelectedRegistryModel(t *test
 	m.modelRegistry = config.ModelRegistry{
 		Providers: []config.ProviderEntry{
 			{
-				Name:     "gateway",
-				Provider: "openai-compatible",
-				BaseURL:  "https://example.test/v1",
-				APIKey:   "k",
+				Name:    "gateway",
+				BaseURL: "https://example.test/v1",
+				APIKey:  "k",
 				Models: []config.ModelEntry{
-					{Name: "flash", Model: "gemini-3-flash-preview"},
+					{Name: "flash", Model: "gemini-3-flash-preview", APIFormat: "openai-compatible", Temperature: 0.25, MaxTokens: 4096},
 				},
 			},
 		},
@@ -1061,7 +1317,7 @@ func TestMessageBrowse_GCreatesAssistantVersionFromSelectedRegistryModel(t *test
 		Content:            "v1",
 		VersionNumber:      1,
 		SnapshotProvider:   "gateway",
-		SnapshotModel:      "gemini-3-flash-preview",
+		SnapshotModel:      "gemini-3-flash-preview", SnapshotAPIFormat:  "openai-compatible",
 		SnapshotRoleName:   "writer",
 		SnapshotRolePrompt: "be concise",
 	})
@@ -1084,7 +1340,7 @@ func TestMessageBrowse_GCreatesAssistantVersionFromSelectedRegistryModel(t *test
 	if m.mode != modeModelSelector {
 		t.Fatalf("mode = %v, want modeModelSelector", m.mode)
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m = next.(Model)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(Model)
@@ -1107,16 +1363,45 @@ func TestMessageBrowse_GCreatesAssistantVersionFromSelectedRegistryModel(t *test
 	}
 }
 
-func TestMessageBrowse_RDisabledForLegacyVersion(t *testing.T) {
+func TestMessageBrowse_EditModeAcceptsTypingAndEscCancelsEdit(t *testing.T) {
+	m := newEditableBrowseModel(t)
+	m.mode = modeMessageBrowse
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	if !m.messageBrowse.editMode {
+		t.Fatal("editMode = false, want true")
+	}
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if got := m.messageBrowse.editBuffer; got != "q1x" {
+		t.Fatalf("editBuffer = %q, want q1x", got)
+	}
+
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.messageBrowse.editMode {
+		t.Fatal("editMode = true, want false after esc")
+	}
+	if m.mode != modeMessageBrowse {
+		t.Fatalf("mode = %v, want modeMessageBrowse", m.mode)
+	}
+}
+
+func TestMessageBrowse_CompareEscAndVReturnToMessageMode(t *testing.T) {
 	m := newVersionedBrowseModel(t)
 	m.mode = modeMessageBrowse
-	m.messageBrowse.turns[0].AssistantVersions[0].SnapshotProvider = ""
-	m.messageBrowse.turns[0].AssistantVersions[0].SnapshotModel = ""
-	m.messageBrowse.turns[0].AssistantVersions[0].SnapshotRolePrompt = ""
+	m.messageBrowse.mode = browseModeCompare
 
-	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if got := m.messageBrowse.mode; got != browseModeMessage {
+		t.Fatalf("browse mode after v = %v, want browseModeMessage", got)
+	}
 
-	if got := m.statusMsg; got != "Legacy version cannot be regenerated" {
-		t.Fatalf("statusMsg = %q, want legacy warning", got)
+	m.messageBrowse.mode = browseModeCompare
+	m, _ = m.updateMessageBrowse(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeMessageBrowse {
+		t.Fatalf("mode after esc = %v, want modeMessageBrowse", m.mode)
+	}
+	if got := m.messageBrowse.mode; got != browseModeMessage {
+		t.Fatalf("browse mode after esc = %v, want browseModeMessage", got)
 	}
 }

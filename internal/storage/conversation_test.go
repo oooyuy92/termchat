@@ -66,7 +66,7 @@ func TestSaveAndLoad(t *testing.T) {
 
 	messages := []chat.Message{
 		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "hi there"},
+		{Role: "assistant", Content: "hi there", SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"},
 	}
 
 	if err := store.Save("test-conv", messages); err != nil {
@@ -165,7 +165,7 @@ func TestLoadAllForSearch(t *testing.T) {
 
 	_ = s.Save("conv-a", []chat.Message{
 		{Role: "user", Content: "hello world"},
-		{Role: "assistant", Content: "hi there"},
+		{Role: "assistant", Content: "hi there", SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"},
 	})
 	_ = s.Save("conv-b", []chat.Message{
 		{Role: "user", Content: "深度求索"},
@@ -198,7 +198,7 @@ func TestListWithDate(t *testing.T) {
 	if err := store.Save("conv-a", []chat.Message{{Role: "user", Content: "hello from conv-a"}}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := store.Save("conv-b", []chat.Message{{Role: "assistant", Content: "bot first"}, {Role: "user", Content: "hello from conv-b"}}); err != nil {
+	if err := store.Save("conv-b", []chat.Message{{Role: "assistant", Content: "bot first", SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"}, {Role: "user", Content: "hello from conv-b"}}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
@@ -231,6 +231,28 @@ func TestListWithDate(t *testing.T) {
 	}
 }
 
+func TestConversationModelBindingRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+
+	if err := store.Save("conv", []chat.Message{{Role: "user", Content: "hello"}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.SetConversationModelBinding("conv", "gateway", "flash"); err != nil {
+		t.Fatalf("SetConversationModelBinding() error = %v", err)
+	}
+
+	providerName, modelName, err := store.GetConversationModelBinding("conv")
+	if err != nil {
+		t.Fatalf("GetConversationModelBinding() error = %v", err)
+	}
+	if providerName != "gateway" {
+		t.Fatalf("providerName = %q, want gateway", providerName)
+	}
+	if modelName != "flash" {
+		t.Fatalf("modelName = %q, want flash", modelName)
+	}
+}
+
 func TestConversationStore_InsertAndLoadActiveTimeline(t *testing.T) {
 	store := newTestStore(t)
 
@@ -240,10 +262,12 @@ func TestConversationStore_InsertAndLoadActiveTimeline(t *testing.T) {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
 	replyID, err := store.AppendMessage(name, chat.Message{
-		Seq:           1,
-		Role:          "assistant",
-		Content:       "answer v1",
-		VersionNumber: 1,
+		Seq:              1,
+		Role:             "assistant",
+		Content:          "answer v1",
+		VersionNumber:    1,
+		SnapshotProvider: "openai-compatible",
+		SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible",
 	})
 	if err != nil {
 		t.Fatalf("AppendMessage(assistant) error = %v", err)
@@ -252,10 +276,12 @@ func TestConversationStore_InsertAndLoadActiveTimeline(t *testing.T) {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
 	if _, err := store.AppendAssistantVersion(name, replyID, chat.Message{
-		Seq:           1,
-		Role:          "assistant",
-		Content:       "answer v2",
-		VersionNumber: 2,
+		Seq:              1,
+		Role:             "assistant",
+		Content:          "answer v2",
+		VersionNumber:    2,
+		SnapshotProvider: "openai-compatible",
+		SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible",
 	}); err != nil {
 		t.Fatalf("AppendAssistantVersion() error = %v", err)
 	}
@@ -293,6 +319,7 @@ func TestAppendAssistantMessagePersistsGenerationSnapshot(t *testing.T) {
 		VersionNumber:      1,
 		SnapshotProvider:   "anthropic-direct",
 		SnapshotModel:      "claude-sonnet-4-20250514",
+		SnapshotAPIFormat:  "anthropic",
 		SnapshotRoleName:   "writer",
 		SnapshotRolePrompt: "be concise",
 	})
@@ -307,6 +334,9 @@ func TestAppendAssistantMessagePersistsGenerationSnapshot(t *testing.T) {
 	if got[1].SnapshotProvider != "anthropic-direct" {
 		t.Fatalf("SnapshotProvider = %q, want anthropic-direct", got[1].SnapshotProvider)
 	}
+	if got[1].SnapshotAPIFormat != "anthropic" {
+		t.Fatalf("SnapshotAPIFormat = %q, want anthropic", got[1].SnapshotAPIFormat)
+	}
 	if got[1].SnapshotRolePrompt != "be concise" {
 		t.Fatalf("SnapshotRolePrompt = %q, want be concise", got[1].SnapshotRolePrompt)
 	}
@@ -315,7 +345,7 @@ func TestAppendAssistantMessagePersistsGenerationSnapshot(t *testing.T) {
 	}
 }
 
-func TestLegacyAssistantWithoutSnapshotIsNonReproducible(t *testing.T) {
+func TestAppendAssistantWithoutSnapshotFails(t *testing.T) {
 	store := newTestStore(t)
 	const name = "conv"
 
@@ -329,16 +359,8 @@ func TestLegacyAssistantWithoutSnapshotIsNonReproducible(t *testing.T) {
 		Content:       "legacy",
 		VersionNumber: 1,
 	})
-	if err != nil {
-		t.Fatalf("AppendMessage(assistant) error = %v", err)
-	}
-
-	got, err := store.LoadBrowseMessages(name)
-	if err != nil {
-		t.Fatalf("LoadBrowseMessages() error = %v", err)
-	}
-	if got[1].HasGenerationSnapshot() {
-		t.Fatalf("HasGenerationSnapshot = true, want false")
+	if err == nil {
+		t.Fatalf("AppendMessage(assistant) error = nil, want snapshot validation error")
 	}
 }
 
@@ -347,14 +369,14 @@ func TestConversationStore_SetActiveVersionAndTruncateAfterSeq(t *testing.T) {
 
 	name := "conv"
 	_, _ = store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "q1"})
-	replyID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	replyID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"})
 	_, _ = store.AppendMessage(name, chat.Message{Seq: 2, Role: "user", Content: "q2"})
-	_, _ = store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1})
+	_, _ = store.AppendMessage(name, chat.Message{Seq: 2, Role: "assistant", Content: "a2", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"})
 
 	if err := store.InitVersionGroup(replyID); err != nil {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
-	if _, err := store.AppendAssistantVersion(name, replyID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2}); err != nil {
+	if _, err := store.AppendAssistantVersion(name, replyID, chat.Message{Seq: 1, Role: "assistant", Content: "v2", VersionNumber: 2, SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"}); err != nil {
 		t.Fatalf("AppendAssistantVersion() error = %v", err)
 	}
 	if err := store.SetActiveVersion(name, replyID, 2); err != nil {
@@ -381,7 +403,7 @@ func TestConversationStore_MarkTurnEditedAndClear(t *testing.T) {
 
 	name := "conv"
 	userID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "user", Content: "old"})
-	assistantID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "reply", VersionNumber: 1})
+	assistantID, _ := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "reply", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"})
 
 	if err := store.MarkTurnEdited(userID, assistantID); err != nil {
 		t.Fatalf("MarkTurnEdited() error = %v", err)
@@ -408,7 +430,7 @@ func TestConversationStore_DeleteVersionPromotesNearestRemaining(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
-	replyID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	replyID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(assistant) error = %v", err)
 	}
@@ -416,10 +438,12 @@ func TestConversationStore_DeleteVersionPromotesNearestRemaining(t *testing.T) {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
 	v2ID, err := store.AppendAssistantVersion(name, replyID, chat.Message{
-		Seq:           1,
-		Role:          "assistant",
-		Content:       "v2",
-		VersionNumber: 2,
+		Seq:              1,
+		Role:             "assistant",
+		Content:          "v2",
+		VersionNumber:    2,
+		SnapshotProvider: "openai-compatible",
+		SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible",
 	})
 	if err != nil {
 		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
@@ -455,7 +479,7 @@ func TestConversationStore_SoftDeleteAndRestoreBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
-	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(assistant) error = %v", err)
 	}
@@ -463,10 +487,12 @@ func TestConversationStore_SoftDeleteAndRestoreBatch(t *testing.T) {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
 	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{
-		Seq:           1,
-		Role:          "assistant",
-		Content:       "v2",
-		VersionNumber: 2,
+		Seq:              1,
+		Role:             "assistant",
+		Content:          "v2",
+		VersionNumber:    2,
+		SnapshotProvider: "openai-compatible",
+		SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible",
 	})
 	if err != nil {
 		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)
@@ -541,7 +567,7 @@ func TestConversationStore_PurgeDeletedRemovesRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendMessage(user) error = %v", err)
 	}
-	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1})
+	assistantID, err := store.AppendMessage(name, chat.Message{Seq: 1, Role: "assistant", Content: "v1", VersionNumber: 1, SnapshotProvider: "openai-compatible", SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible"})
 	if err != nil {
 		t.Fatalf("AppendMessage(v1) error = %v", err)
 	}
@@ -549,10 +575,12 @@ func TestConversationStore_PurgeDeletedRemovesRows(t *testing.T) {
 		t.Fatalf("InitVersionGroup() error = %v", err)
 	}
 	v2ID, err := store.AppendAssistantVersion(name, assistantID, chat.Message{
-		Seq:           1,
-		Role:          "assistant",
-		Content:       "v2",
-		VersionNumber: 2,
+		Seq:              1,
+		Role:             "assistant",
+		Content:          "v2",
+		VersionNumber:    2,
+		SnapshotProvider: "openai-compatible",
+		SnapshotModel:    "gpt-4o", SnapshotAPIFormat: "openai-compatible",
 	})
 	if err != nil {
 		t.Fatalf("AppendAssistantVersion(v2) error = %v", err)

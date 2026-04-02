@@ -15,15 +15,19 @@ type ModelRegistry struct {
 
 type ProviderEntry struct {
 	Name     string       `yaml:"name"`
-	Provider string       `yaml:"provider"`
 	BaseURL  string       `yaml:"base_url"`
 	APIKey   string       `yaml:"api_key"`
 	Models   []ModelEntry `yaml:"models"`
 }
 
 type ModelEntry struct {
-	Name  string `yaml:"name"`
-	Model string `yaml:"model"`
+	Name            string  `yaml:"name"`
+	Model           string  `yaml:"model"`
+	APIFormat       string  `yaml:"api_format"`
+	Temperature     float64 `yaml:"temperature"`
+	MaxTokens       int     `yaml:"max_tokens"`
+	ReasoningEffort string  `yaml:"reasoning_effort,omitempty"`
+	BudgetTokens    int     `yaml:"budget_tokens,omitempty"`
 }
 
 func DefaultModelRegistry() ModelRegistry {

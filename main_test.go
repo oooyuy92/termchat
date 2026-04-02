@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/termchat/termchat/internal/chat"
 	"github.com/termchat/termchat/internal/config"
 )
 
@@ -89,5 +92,46 @@ func TestResolveAltScreenModeInvalidFallsBackToAuto(t *testing.T) {
 	t.Setenv("ZELLIJ", "1")
 	if resolveAltScreenMode(false, "invalid-value") {
 		t.Fatal("expected invalid mode to behave like auto in zellij")
+	}
+}
+
+func TestConfigValuesFlowIntoGeminiProvider(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	content := []byte(`api:
+  provider: gemini
+  base_url: https://example.test/gemini
+  api_key: test-key
+  model: gemini-3.1-pro-preview
+parameters:
+  temperature: 1
+  max_tokens: 40000
+storage:
+  dir: ~/.local/share/termchat/conversations
+settings:
+  theme: light
+  alternate_screen: auto
+`)
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, missing, err := config.LoadOrDefault(configPath)
+	if err != nil {
+		t.Fatalf("LoadOrDefault() error = %v", err)
+	}
+	if missing {
+		t.Fatal("LoadOrDefault() reported missing config for an existing file")
+	}
+
+	client := chat.NewProvider(cfg.API.Provider, cfg.API.BaseURL, cfg.API.APIKey, cfg.API.Model)
+	if got := client.Model(); got != "gemini-3.1-pro-preview" {
+		t.Fatalf("client.Model() = %q, want gemini-3.1-pro-preview", got)
+	}
+	if got := client.BaseURL(); got != "https://example.test/gemini" {
+		t.Fatalf("client.BaseURL() = %q, want https://example.test/gemini", got)
+	}
+	if got := client.APIKey(); got != "test-key" {
+		t.Fatalf("client.APIKey() = %q, want test-key", got)
 	}
 }

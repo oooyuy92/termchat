@@ -59,7 +59,7 @@ func TestBuildChatContentQuoteWrapKeepsPrefix(t *testing.T) {
 			continue
 		}
 		quoteContentLines++
-		if !strings.HasPrefix(line, "│ ") {
+		if !strings.HasPrefix(strings.TrimLeft(line, " "), "│ ") {
 			t.Fatalf("quote continuation lost prefix: %q", line)
 		}
 	}
@@ -146,7 +146,7 @@ func TestBuildChatContentLazyQuoteContinuationKeepsPrefix(t *testing.T) {
 			continue
 		}
 		quoteContentLines++
-		if !strings.HasPrefix(line, "│ ") {
+		if !strings.HasPrefix(strings.TrimLeft(line, " "), "│ ") {
 			t.Fatalf("lazy quote continuation lost prefix: %q", line)
 		}
 	}
@@ -190,7 +190,114 @@ func TestBuildChatContentLeavesHeadroomToAvoidTerminalSoftWrap(t *testing.T) {
 			maxWidth = w
 		}
 	}
-	if maxWidth > width-6 {
-		t.Fatalf("line width %d exceeds safe headroom width %d", maxWidth, width-6)
+	if maxWidth > width-5 {
+		t.Fatalf("line width %d exceeds safe headroom width %d", maxWidth, width-5)
+	}
+}
+
+func TestBuildChatContentKeepsDecimalTokenIntact(t *testing.T) {
+	renderer, err := buildRenderer("dark", 24)
+	if err != nil {
+		t.Fatalf("buildRenderer() error = %v", err)
+	}
+
+	history := chat.NewHistory()
+	history.Add(chat.Message{
+		Role:    "assistant",
+		Content: "它位于中国和尼泊尔边境线上，它的海拔高度为 8848.86 米。",
+	})
+
+	tab := TabSession{
+		history:  history,
+		renderer: renderer,
+		client:   &stubProvider{model: "test-model"},
+	}
+	m := Model{
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     24,
+	}
+
+	out := xansi.Strip(m.buildChatContent())
+	if strings.Contains(out, "8848.\n86") {
+		t.Fatalf("decimal token was split across lines: %q", out)
+	}
+	if !strings.Contains(out, "8848.86") {
+		t.Fatalf("rendered output missing decimal token: %q", out)
+	}
+}
+
+func TestBuildChatContentAddsHorizontalInsetToMessages(t *testing.T) {
+	renderer, err := buildRenderer("dark", 40)
+	if err != nil {
+		t.Fatalf("buildRenderer() error = %v", err)
+	}
+
+	history := chat.NewHistory()
+	history.Add(chat.Message{
+		Role:    "assistant",
+		Content: "你好",
+	})
+
+	tab := TabSession{
+		history:  history,
+		renderer: renderer,
+		client:   &stubProvider{model: "test-model"},
+	}
+	m := Model{
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     40,
+	}
+
+	out := xansi.Strip(m.buildChatContent())
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "test-model:") || strings.Contains(line, "你好") {
+			if !strings.HasPrefix(line, " ") {
+				t.Fatalf("message line missing horizontal inset: %q", line)
+			}
+		}
+	}
+}
+
+func TestWrapRenderedLineKeepsDecimalTokenIntact(t *testing.T) {
+	line := "海拔高度为 8848.86 米。"
+	got := wrapRenderedLine(line, 16)
+	if strings.Contains(got, "8848.\n86") {
+		t.Fatalf("decimal token was split across lines: %q", got)
+	}
+}
+
+func TestBuildChatContentAvoidsAwkwardMidSentenceBreaks(t *testing.T) {
+	renderer, err := buildRenderer("dark", 24)
+	if err != nil {
+		t.Fatalf("buildRenderer() error = %v", err)
+	}
+
+	history := chat.NewHistory()
+	history.Add(chat.Message{
+		Role: "assistant",
+		Content: "它位于喜马拉雅山脉，也处中国和尼泊尔的边界线上。" +
+			"根据中国和尼泊尔在2020年共同宣布的最新测量数据，它的最新高度为 8848.86 米。",
+	})
+
+	tab := TabSession{
+		history:  history,
+		renderer: renderer,
+		client:   &stubProvider{model: "test-model"},
+	}
+	m := Model{
+		theme:     DarkTheme,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		width:     24,
+	}
+
+	out := xansi.Strip(m.buildChatContent())
+	if strings.Contains(out, "边界线上。\n根据") {
+		t.Fatalf("rendered output contains renderer pre-wrap artifact: %q", out)
 	}
 }

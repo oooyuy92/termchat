@@ -1,4 +1,10 @@
 termchat
 *.exe
 config.yaml
+models.yaml
+roles.yaml
+shortcuts.yaml
+termchat.db
+gemini_debug.log
+.DS_Store
 .worktrees/

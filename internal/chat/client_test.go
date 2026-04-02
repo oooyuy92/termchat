@@ -4,6 +4,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -257,7 +258,8 @@ func TestAnthropicClient_SystemPrompt(t *testing.T) {
 	}
 	ctx := context.Background()
 	chunks, errs := client.SendStreamChan(ctx, messages, 0.7, 1024, "", 0)
-	for range chunks {}
+	for range chunks {
+	}
 	if err := <-errs; err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -355,12 +357,34 @@ func TestGeminiClient_BuildThinkingConfig(t *testing.T) {
 
 func TestGeminiClient_ModelAlias(t *testing.T) {
 	c := NewGeminiClient("", "key", "gemini-3.1-pro-preview")
-	if c.Model() != "gemini-3-pro-preview" {
-		t.Fatalf("model alias not normalized: got %q", c.Model())
+	if c.Model() != "gemini-3.1-pro-preview" {
+		t.Fatalf("model preserved incorrectly: got %q", c.Model())
 	}
 
 	c.SetModel("gemini-3.1-pro-preview")
-	if c.Model() != "gemini-3-pro-preview" {
-		t.Fatalf("set model alias not normalized: got %q", c.Model())
+	if c.Model() != "gemini-3.1-pro-preview" {
+		t.Fatalf("set model preserved incorrectly: got %q", c.Model())
+	}
+}
+
+func TestGeminiClient_BaseURLPreserved(t *testing.T) {
+	c := NewGeminiClient("https://example.test/gemini", "key", "gemini-3.1-pro-preview")
+	if c.BaseURL() != "https://example.test/gemini" {
+		t.Fatalf("BaseURL() = %q, want custom base URL", c.BaseURL())
+	}
+
+	c.SetBaseURL("https://example.test/gemini/v2/")
+	if c.BaseURL() != "https://example.test/gemini/v2" {
+		t.Fatalf("BaseURL() after SetBaseURL = %q, want trimmed custom base URL", c.BaseURL())
+	}
+}
+
+func TestAnnotateGeminiError_AddsProtocolHintForOpenAIStyleGatewayErrors(t *testing.T) {
+	err := annotateGeminiError(errors.New(`stream: Error 429, Message: {"error":{"message":"openai_error","type":"bad_response_status_code"}}`))
+	if !strings.Contains(err.Error(), `set `+"`api.provider`"+` to "openai-compatible"`) {
+		t.Fatalf("annotated error missing provider hint: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Gemini native API") {
+		t.Fatalf("annotated error missing protocol hint: %v", err)
 	}
 }

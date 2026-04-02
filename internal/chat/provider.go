@@ -39,10 +39,10 @@ func newHTTPClient() *http.Client {
 	}
 }
 
-// NewProvider creates the appropriate Provider for the given provider string.
-// provider: "anthropic" | "gemini" | "openai" | "openai-compatible"
-func NewProvider(provider, baseURL, apiKey, model string) Provider {
-	switch provider {
+// NewProvider creates the appropriate Provider for the given API format.
+// apiFormat: "anthropic" | "gemini" | "openai" | "openai-compatible"
+func NewProvider(apiFormat, baseURL, apiKey, model string) Provider {
+	switch apiFormat {
 	case "anthropic":
 		return NewAnthropicClient(baseURL, apiKey, model)
 	case "gemini":

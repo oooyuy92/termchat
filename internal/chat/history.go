@@ -23,6 +23,7 @@ type Message struct {
 	DeletedBatchID        int64       `json:"deleted_batch_id"`
 	SnapshotProvider      string      `json:"snapshot_provider"`
 	SnapshotModel         string      `json:"snapshot_model"`
+	SnapshotAPIFormat     string      `json:"snapshot_api_format"`
 	SnapshotRoleName      string      `json:"snapshot_role_name"`
 	SnapshotRolePrompt    string      `json:"snapshot_role_prompt"`
 }
@@ -93,5 +94,5 @@ func (h *History) ReplaceMessages(messages []Message) {
 func (m Message) HasGenerationSnapshot() bool {
 	return m.SnapshotProvider != "" &&
 		m.SnapshotModel != "" &&
-		m.SnapshotRolePrompt != ""
+		m.SnapshotAPIFormat != ""
 }

@@ -65,8 +65,8 @@ func TestHistory_DeleteAt(t *testing.T) {
 func TestHistory_DeleteAt_OutOfBounds(t *testing.T) {
 	h := NewHistory()
 	h.Add(Message{Role: "user", Content: "a"})
-	h.DeleteAt(-1)  // no-op
-	h.DeleteAt(5)   // no-op
+	h.DeleteAt(-1) // no-op
+	h.DeleteAt(5)  // no-op
 	if len(h.Messages()) != 1 {
 		t.Errorf("len = %d, want 1 (out-of-bounds delete should be no-op)", len(h.Messages()))
 	}
@@ -118,13 +118,13 @@ func TestHistory_Truncate_Noop(t *testing.T) {
 func TestHistory_MessagesPreserveMetadata(t *testing.T) {
 	h := NewHistory()
 	h.Add(Message{
-		ID:                   42,
-		Seq:                  7,
-		Role:                 "assistant",
-		Content:              "v2 reply",
-		VersionGroupID:       40,
-		VersionNumber:        2,
-		TotalVersions:        4,
+		ID:                    42,
+		Seq:                   7,
+		Role:                  "assistant",
+		Content:               "v2 reply",
+		VersionGroupID:        40,
+		VersionNumber:         2,
+		TotalVersions:         4,
 		EditedAfterGeneration: false,
 		StaleAfterUserEdit:    true,
 	})
@@ -158,5 +158,18 @@ func TestHistory_ReplaceMessages(t *testing.T) {
 	}
 	if msgs[0].Content != "edited" || msgs[1].Content != "active reply" {
 		t.Fatalf("ReplaceMessages() = %+v", msgs)
+	}
+}
+
+func TestMessage_HasGenerationSnapshotAllowsEmptyRolePrompt(t *testing.T) {
+	msg := Message{
+		SnapshotProvider:   "gateway",
+		SnapshotModel:      "gemini-3-flash-preview",
+		SnapshotAPIFormat:  "gemini",
+		SnapshotRolePrompt: "",
+	}
+
+	if !msg.HasGenerationSnapshot() {
+		t.Fatalf("HasGenerationSnapshot() = false, want true when provider/model/api_format are present")
 	}
 }

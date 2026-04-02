@@ -14,25 +14,28 @@ import (
 
 // TabSession holds all state specific to one chat tab.
 type TabSession struct {
-	name             string
-	client           chat.Provider
-	history          *chat.History
-	viewport         viewport.Model
-	textarea         textarea.Model
-	spinner          spinner.Model
-	renderer         *glamour.TermRenderer
-	streaming        bool
-	streamCh         <-chan chat.StreamChunk
-	streamErr        <-chan error
-	streamCtrl       *streamControl
-	currentResp      string
-	currentThinking  string
-	chatFollowBottom bool
-	pendingImages    []chat.ImageData
-	imageCounter     int
-	autoSaveName     string
-	totalTokens      int
-	err              error
+	name               string
+	client             chat.Provider
+	providerConfigName string
+	apiFormat          string
+	modelConfigName    string
+	history            *chat.History
+	viewport           viewport.Model
+	textarea           textarea.Model
+	spinner            spinner.Model
+	renderer           *glamour.TermRenderer
+	streaming          bool
+	streamCh           <-chan chat.StreamChunk
+	streamErr          <-chan error
+	streamCtrl         *streamControl
+	currentResp        string
+	currentThinking    string
+	chatFollowBottom   bool
+	pendingImages      []chat.ImageData
+	imageCounter       int
+	autoSaveName       string
+	totalTokens        int
+	err                error
 }
 
 type tabHitAction int
@@ -78,14 +81,17 @@ func newTabSession(cfg config.Config, client chat.Provider, width int) (TabSessi
 	vp.MouseWheelEnabled = true // Enable mouse wheel scrolling in viewport
 
 	return TabSession{
-		name:             client.Model(),
-		client:           client,
-		history:          chat.NewHistory(),
-		viewport:         vp,
-		textarea:         ta,
-		spinner:          sp,
-		renderer:         renderer,
-		chatFollowBottom: true,
-		autoSaveName:     time.Now().Format("2006-01-02_150405"),
+		name:               client.Model(),
+		client:             client,
+		providerConfigName: cfg.API.Provider,
+		apiFormat:          cfg.API.Provider,
+		modelConfigName:    cfg.API.Model,
+		history:            chat.NewHistory(),
+		viewport:           vp,
+		textarea:           ta,
+		spinner:            sp,
+		renderer:           renderer,
+		chatFollowBottom:   true,
+		autoSaveName:       time.Now().Format("2006-01-02_150405"),
 	}, nil
 }

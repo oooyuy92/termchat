@@ -120,10 +120,13 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case shortcutModeEditContent:
 		switch msg.String() {
-		case "ctrl+s":
+		case "enter":
 			ed.items[ed.cursor].Content = ed.editBuf
 			ed.subMode = shortcutModeList
 			return m, m.saveShortcutsCmd()
+		case "shift+enter":
+			ed.editBuf += "\n"
+			ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 		case "up", "k":
 			if ed.scrollTop > 0 {
 				ed.scrollTop--
@@ -133,9 +136,6 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if ed.scrollTop < max {
 				ed.scrollTop++
 			}
-		case "enter":
-			ed.editBuf += "\n"
-			ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 		case "esc":
 			if ed.isNew {
 				ed.items = ed.items[:len(ed.items)-1]
@@ -155,7 +155,12 @@ func (m Model) updateShortcutsMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		default:
 			if msg.Type == tea.KeyRunes {
-				ed.editBuf += string(msg.Runes)
+				text := string(msg.Runes)
+				if text == "\n" {
+					ed.editBuf += "\n"
+				} else {
+					ed.editBuf += text
+				}
 				ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 			}
 		}
@@ -265,7 +270,7 @@ func (m Model) viewShortcutsEditor() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: newline  |  Ctrl+S: save  |  ↑↓: scroll  |  Esc: cancel"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: save  |  Shift+Enter: newline  |  ↑↓: scroll  |  Esc: cancel"))
 		b.WriteString("\n")
 	}
 

@@ -129,10 +129,13 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case roleModeEditPrompt:
 		switch msg.String() {
-		case "ctrl+s":
+		case "enter":
 			ed.items[ed.cursor].Prompt = ed.editBuf
 			ed.subMode = roleModeList
 			return m, m.saveRolesCmd()
+		case "shift+enter":
+			ed.editBuf += "\n"
+			ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 		case "up", "k":
 			if ed.scrollTop > 0 {
 				ed.scrollTop--
@@ -142,9 +145,6 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if ed.scrollTop < max {
 				ed.scrollTop++
 			}
-		case "enter":
-			ed.editBuf += "\n"
-			ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 		case "esc":
 			if ed.isNew {
 				ed.items = ed.items[:len(ed.items)-1]
@@ -164,7 +164,12 @@ func (m Model) updateRolesMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		default:
 			if msg.Type == tea.KeyRunes {
-				ed.editBuf += string(msg.Runes)
+				text := string(msg.Runes)
+				if text == "\n" {
+					ed.editBuf += "\n"
+				} else {
+					ed.editBuf += text
+				}
 				ed.scrollTop = editScrollMax(ed.editBuf, m.height, 7)
 			}
 		}
@@ -282,7 +287,7 @@ func (m Model) viewRolesEditor() string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: 换行  |  Ctrl+S: 保存  |  ↑↓: 滚动  |  Esc: 取消"))
+		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: 保存  |  Shift+Enter: 换行  |  ↑↓: 滚动  |  Esc: 取消"))
 		b.WriteString("\n")
 	}
 

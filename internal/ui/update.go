@@ -178,11 +178,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if input == "" {
 				return m, nil
 			}
-			tab.textarea.Reset()
-
 			if strings.HasPrefix(input, "/") {
+				tab.textarea.Reset()
 				return m.handleCommand(input)
 			}
+			if _, _, err := m.resolveCurrentTabModelSelection(tab); err != nil {
+				m.statusMsg = "Send failed: " + err.Error()
+				return m, nil
+			}
+			tab.textarea.Reset()
 
 			if len(tab.pendingImages) > 0 && !tab.client.SupportsVision() {
 				tab.pendingImages = nil
@@ -336,12 +340,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					userMsg = msgs[len(msgs)-1]
 				}
 
+				snapshotProvider, snapshotModel, snapshotAPIFormat, snapshotRoleName, snapshotRolePrompt := m.generationSnapshotForTab(t)
+
 				// Create assistant message
 				assistantMsg := chat.Message{
-					Seq:           userMsg.Seq,
-					Role:          "assistant",
-					Content:       t.currentResp,
-					VersionNumber: 1,
+					Seq:                userMsg.Seq,
+					Role:               "assistant",
+					Content:            t.currentResp,
+					VersionNumber:      1,
+					SnapshotProvider:   snapshotProvider,
+					SnapshotModel:      snapshotModel,
+					SnapshotAPIFormat:  snapshotAPIFormat,
+					SnapshotRoleName:   snapshotRoleName,
+					SnapshotRolePrompt: snapshotRolePrompt,
 				}
 
 				// Persist assistant message to storage
@@ -371,11 +382,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t := &m.tabs[msg.TabIdx]
 			t.streaming = false
 			errorText := "Error: " + msg.Err.Error()
+			snapshotProvider, snapshotModel, snapshotAPIFormat, snapshotRoleName, snapshotRolePrompt := m.generationSnapshotForTab(t)
 			assistantMsg := chat.Message{
-				Seq:           nextSeq(t.history.Messages()),
-				Role:          "assistant",
-				Content:       errorText,
-				VersionNumber: 1,
+				Seq:                nextSeq(t.history.Messages()),
+				Role:               "assistant",
+				Content:            errorText,
+				VersionNumber:      1,
+				SnapshotProvider:   snapshotProvider,
+				SnapshotModel:      snapshotModel,
+				SnapshotAPIFormat:  snapshotAPIFormat,
+				SnapshotRoleName:   snapshotRoleName,
+				SnapshotRolePrompt: snapshotRolePrompt,
 			}
 			msgs := t.history.Messages()
 			if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
@@ -496,11 +513,15 @@ func (m Model) updateTabRenameMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m *Model) newTab() tea.Cmd {
+	current := m.tabs[m.activeTab]
 	tab, err := newTabSession(m.cfg, m.tabs[m.activeTab].client, m.width)
 	if err != nil {
 		m.statusMsg = "Failed to create tab: " + err.Error()
 		return nil
 	}
+	tab.providerConfigName = current.providerConfigName
+	tab.apiFormat = current.apiFormat
+	tab.modelConfigName = current.modelConfigName
 	m.tabs = append(m.tabs, tab)
 	m.activeTab = len(m.tabs) - 1
 	m.syncActiveTabWindowSize()
@@ -579,10 +600,7 @@ func (m Model) sendStreamCmd(ctx context.Context, tabIdx int) tea.Cmd {
 	tab := m.tabs[tabIdx]
 	messages := tab.history.ToAPIMessages()
 	client := tab.client
-	temp := m.cfg.Parameters.Temperature
-	maxTok := m.cfg.Parameters.MaxTokens
-	reasoningEffort := m.cfg.Parameters.ReasoningEffort
-	budgetTokens := m.cfg.Parameters.BudgetTokens
+	temp, maxTok, reasoningEffort, budgetTokens := m.generationParametersForTab(&tab)
 
 	return func() tea.Msg {
 		chunks, errs := client.SendStreamChan(ctx, messages, temp, maxTok, reasoningEffort, budgetTokens)

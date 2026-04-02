@@ -8,7 +8,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/muesli/reflow/wrap"
+	"github.com/muesli/reflow/wordwrap"
 )
+
+const chatHorizontalInset = 1
 
 // cleanGlamourOutput strips glamour's leading/trailing blank lines and
 // collapses inter-paragraph blank lines.
@@ -38,7 +41,7 @@ func wrapRenderedLine(line string, width int) string {
 
 	plain := xansi.Strip(line)
 	if !strings.HasPrefix(plain, "│ ") {
-		return wrap.String(line, width)
+		return wrapMixedLine(line, width)
 	}
 
 	const quotePrefixWidth = 2 // "│ "
@@ -48,13 +51,33 @@ func wrapRenderedLine(line string, width int) string {
 
 	prefix := xansi.Cut(line, 0, quotePrefixWidth)
 	content := xansi.Cut(line, quotePrefixWidth, xansi.StringWidth(line))
-
-	wrappedContent := wrap.String(content, width-quotePrefixWidth)
-	parts := strings.Split(wrappedContent, "\n")
+	parts := wrapMixedParts(content, width-quotePrefixWidth)
 	for i, part := range parts {
 		parts[i] = prefix + part
 	}
 	return strings.Join(parts, "\n")
+}
+
+func wrapMixedLine(line string, width int) string {
+	return strings.Join(wrapMixedParts(line, width), "\n")
+}
+
+func wrapMixedParts(line string, width int) []string {
+	if width <= 0 || xansi.StringWidth(line) <= width {
+		return []string{line}
+	}
+
+	wordWrapped := wordwrap.String(line, width)
+	parts := strings.Split(wordWrapped, "\n")
+	var out []string
+	for _, part := range parts {
+		if xansi.StringWidth(part) <= width {
+			out = append(out, part)
+			continue
+		}
+		out = append(out, strings.Split(wrap.String(part, width), "\n")...)
+	}
+	return out
 }
 
 func hardWrapRenderedMarkdown(s string, width int) string {
@@ -73,63 +96,83 @@ func (m Model) buildChatContent() string {
 	var b strings.Builder
 
 	tab := m.activeTabSession()
+	contentWidth := m.width - chatHorizontalInset*2
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	assistantWrapWidth := contentWidth - chatHorizontalInset - 1
+	if assistantWrapWidth < 1 {
+		assistantWrapWidth = 1
+	}
+	inset := strings.Repeat(" ", chatHorizontalInset)
 
 	// Render conversation history.
 	for _, msg := range tab.history.Messages() {
 		switch msg.Role {
 		case "user":
-			maxBubbleWidth := m.width * 2 / 3
+			maxBubbleWidth := contentWidth * 2 / 3
 			if maxBubbleWidth < 20 {
 				maxBubbleWidth = 20
 			}
 			wrapped := wrap.String(msg.Content, maxBubbleWidth-2)
 			block := m.theme.UserLabelStyle().Render("You:") + "\n" + wrapped
 			bubble := m.theme.UserMsgStyle().Render(block)
-			b.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Right, bubble) + "\n\n")
+			b.WriteString(inset + lipgloss.PlaceHorizontal(contentWidth, lipgloss.Right, bubble) + "\n\n")
 		case "assistant":
 			label := tab.client.Model() + ":"
 			if msg.TotalVersions > 1 {
 				label = fmt.Sprintf("%s [%d versions]", label, msg.TotalVersions)
 			}
-			b.WriteString(m.theme.AssistantLabelStyle().Render(label) + "\n")
+			b.WriteString(inset + m.theme.AssistantLabelStyle().Render(label) + "\n")
 			rendered, err := tab.renderer.Render(msg.Content)
 			if err != nil {
-				b.WriteString(msg.Content + "\n\n")
+				b.WriteString(inset + msg.Content + "\n\n")
 			} else {
 				cleaned := cleanGlamourOutput(rendered)
 				// Hard-wrap long lines (e.g. Chinese text with no spaces) while
 				// preserving blockquote prefixes on continuation lines.
-				cleaned = hardWrapRenderedMarkdown(cleaned, m.width)
-				b.WriteString(cleaned + "\n\n")
+				cleaned = hardWrapRenderedMarkdown(cleaned, assistantWrapWidth)
+				b.WriteString(indentBlock(cleaned, inset) + "\n\n")
 			}
 		}
 	}
 
 	// Render current streaming response.
 	if tab.streaming {
-		b.WriteString(m.theme.AssistantLabelStyle().Render(tab.client.Model()+":") + "\n")
+		b.WriteString(inset + m.theme.AssistantLabelStyle().Render(tab.client.Model()+":") + "\n")
 		if tab.currentThinking != "" {
 			thinking := strings.ReplaceAll(strings.TrimSpace(tab.currentThinking), "\n\n", "\n")
-			b.WriteString(m.theme.ThinkingStyle().Render("\U0001f4ad "+thinking) + "\n")
+			b.WriteString(indentBlock(m.theme.ThinkingStyle().Render("\U0001f4ad "+thinking), inset) + "\n")
 		}
 		if tab.currentResp != "" {
 			rendered, err := tab.renderer.Render(tab.currentResp)
 			if err != nil {
-				b.WriteString(tab.currentResp)
+				b.WriteString(indentBlock(tab.currentResp, inset))
 			} else {
 				cleaned := cleanGlamourOutput(rendered)
-				cleaned = hardWrapRenderedMarkdown(cleaned, m.width)
-				b.WriteString(cleaned + "\n")
+				cleaned = hardWrapRenderedMarkdown(cleaned, assistantWrapWidth)
+				b.WriteString(indentBlock(cleaned, inset) + "\n")
 			}
 		}
 	}
 
 	// Render error.
 	if tab.err != nil {
-		b.WriteString(m.theme.ErrStyle().Render(fmt.Sprintf("Error: %v", tab.err)) + "\n")
+		b.WriteString(inset + m.theme.ErrStyle().Render(fmt.Sprintf("Error: %v", tab.err)) + "\n")
 	}
 
 	return b.String()
+}
+
+func indentBlock(s, prefix string) string {
+	if prefix == "" || s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) View() string {

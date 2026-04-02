@@ -88,6 +88,75 @@ func TestViewMessageBrowse_HelpIncludesDeleteAndBranchWhenNarrow(t *testing.T) {
 	}
 }
 
+func TestViewMessageBrowse_HelpIncludesGenerateAndRegenerate(t *testing.T) {
+	m := newMessageBrowseViewModel(t)
+	m.width = 80
+	m.mode = modeMessageBrowse
+	m.messageBrowse.mode = browseModeMessage
+	m.messageBrowse.turns = []browseTurn{
+		{
+			User: chat.Message{Role: "user", Content: "left pane"},
+			AssistantVersions: []chat.Message{
+				{Role: "assistant", Content: "right pane", VersionNumber: 1, TotalVersions: 2},
+			},
+		},
+	}
+
+	out := xansi.Strip(m.viewMessageBrowse())
+	if !strings.Contains(out, "g: new version") {
+		t.Fatalf("output missing generate help: %q", out)
+	}
+	if !strings.Contains(out, "r: regenerate") {
+		t.Fatalf("output missing regenerate help: %q", out)
+	}
+}
+
+func TestViewMessageBrowse_EditModeRendersEditingState(t *testing.T) {
+	m := newMessageBrowseViewModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.mode = browseModeMessage
+	m.messageBrowse.editMode = true
+	m.messageBrowse.editBuffer = "edited left pane"
+	m.messageBrowse.turns = []browseTurn{
+		{
+			User: chat.Message{Role: "user", Content: "left pane"},
+			AssistantVersions: []chat.Message{
+				{Role: "assistant", Content: "right pane", VersionNumber: 1, TotalVersions: 1},
+			},
+		},
+	}
+
+	out := xansi.Strip(m.viewMessageBrowse())
+	if !strings.Contains(out, "User [editing]") {
+		t.Fatalf("output missing editing title: %q", out)
+	}
+	if !strings.Contains(out, "edited left pane") {
+		t.Fatalf("output missing edit buffer content: %q", out)
+	}
+}
+
+func TestViewMessageBrowse_RendersEditedAndStaleLabels(t *testing.T) {
+	m := newMessageBrowseViewModel(t)
+	m.mode = modeMessageBrowse
+	m.messageBrowse.mode = browseModeMessage
+	m.messageBrowse.turns = []browseTurn{
+		{
+			User: chat.Message{Role: "user", Content: "left pane", EditedAfterGeneration: true},
+			AssistantVersions: []chat.Message{
+				{Role: "assistant", Content: "right pane", VersionNumber: 1, TotalVersions: 1, StaleAfterUserEdit: true},
+			},
+		},
+	}
+
+	out := xansi.Strip(m.viewMessageBrowse())
+	if !strings.Contains(out, "User [edited]") {
+		t.Fatalf("output missing edited label: %q", out)
+	}
+	if !strings.Contains(out, "Assistant v1/1 [stale]") {
+		t.Fatalf("output missing stale label: %q", out)
+	}
+}
+
 func TestViewMessageBrowseShowsProviderAndModelLabels(t *testing.T) {
 	m := newMessageBrowseViewModel(t)
 	m.width = 140
@@ -103,7 +172,7 @@ func TestViewMessageBrowseShowsProviderAndModelLabels(t *testing.T) {
 					VersionNumber:    1,
 					TotalVersions:    2,
 					SnapshotProvider: "gateway",
-					SnapshotModel:    "gemini-3-flash-preview",
+					SnapshotModel:      "gemini-3-flash-preview", SnapshotAPIFormat:  "openai-compatible",
 				},
 			},
 		},

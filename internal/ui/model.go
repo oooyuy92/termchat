@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -162,6 +163,12 @@ type modelSelectorState struct {
 	providerCursor  int
 	modelCursor     int
 	selectingModels bool
+	editing         bool
+	editTargetModel bool
+	editIsNew       bool
+	editDirty       bool
+	editReadyToSave bool
+	editor          configEditor
 }
 
 type streamControl struct {
@@ -239,28 +246,28 @@ type Model struct {
 	tabOverflowOffset int
 
 	// UI state
-	mode          uiMode
-	configEd      configEditor
-	resumePick    resumePicker
-	shortcutsPath string
-	shortcutEd    shortcutEditor
-	rolesPath     string
-	roleEd        roleEditor
-	rolePick      rolePicker
+	mode              uiMode
+	configEd          configEditor
+	resumePick        resumePicker
+	shortcutsPath     string
+	shortcutEd        shortcutEditor
+	rolesPath         string
+	roleEd            roleEditor
+	rolePick          rolePicker
 	modelRegistryPath string
 	modelRegistry     config.ModelRegistry
 	modelSel          modelSelectorState
-	providerFactory   func(providerType, baseURL, apiKey, model string) chat.Provider
-	activeRole    string // name of the selected role; shown in status bar
-	cfgPath       string
-	slashAC       slashComplete
-	escCount      int // consecutive Esc presses in chat mode for double-Esc detection
-	messageBrowse messageBrowseState
-	browseCursor  int // index of selected message in modeMessageBrowse
-	confirmQuit   bool
-	statusMsg     string
-	width         int
-	height        int
+	providerFactory   func(apiFormat, baseURL, apiKey, model string) chat.Provider
+	activeRole        string // name of the selected role; shown in status bar
+	cfgPath           string
+	slashAC           slashComplete
+	escCount          int // consecutive Esc presses in chat mode for double-Esc detection
+	messageBrowse     messageBrowseState
+	browseCursor      int // index of selected message in modeMessageBrowse
+	confirmQuit       bool
+	statusMsg         string
+	width             int
+	height            int
 }
 
 func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
@@ -277,7 +284,6 @@ func buildRenderer(theme string, width int) (*glamour.TermRenderer, error) {
 	s.Paragraph.BlockSuffix = ""
 	return glamour.NewTermRenderer(
 		glamour.WithStyles(s),
-		glamour.WithWordWrap(markdownWrapWidth(width)),
 	)
 }
 
@@ -325,33 +331,27 @@ func NewModel(cfg config.Config, cfgPath string, onboarding bool, client chat.Pr
 		initialMode = modeRolePicker
 	}
 
-	// onboarding takes priority over role picker
-	if onboarding {
+	// onboarding takes priority over role picker whenever setup is incomplete.
+	if onboarding || len(modelRegistry.Providers) == 0 {
 		initialMode = modeOnboard
 	}
 
-	var initConfigEd configEditor
-	if onboarding {
-		initConfigEd = configEditor{fields: buildOnboardFields(cfg)}
-	}
-
 	return Model{
-		cfg:           cfg,
-		store:         store,
-		cfgPath:       cfgPath,
-		shortcutsPath: shortcutsPath,
-		theme:         ThemeByName(cfg.Settings.Theme),
-		mode:          initialMode,
-		rolesPath:     rolesPath,
-		rolePick:      rolePick,
+		cfg:               cfg,
+		store:             store,
+		cfgPath:           cfgPath,
+		shortcutsPath:     shortcutsPath,
+		theme:             ThemeByName(cfg.Settings.Theme),
+		mode:              initialMode,
+		rolesPath:         rolesPath,
+		rolePick:          rolePick,
 		modelRegistryPath: modelRegistryPath,
 		modelRegistry:     modelRegistry,
-		providerFactory: func(providerType, baseURL, apiKey, model string) chat.Provider {
-			return chat.NewProvider(providerType, baseURL, apiKey, model)
+		providerFactory: func(apiFormat, baseURL, apiKey, model string) chat.Provider {
+			return chat.NewProvider(apiFormat, baseURL, apiKey, model)
 		},
-		configEd:      initConfigEd,
-		tabs:          []TabSession{tab},
-		activeTab:     0,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
 	}, nil
 }
 
@@ -379,6 +379,75 @@ func (m *Model) recreateRenderer(width int) {
 // Safe to call from both pointer and value receivers.
 func (m Model) activeTabSession() *TabSession {
 	return &m.tabs[m.activeTab]
+}
+
+func (m Model) generationSnapshotForTab(tab *TabSession) (providerName, model, apiFormat, roleName, rolePrompt string) {
+	if tab == nil {
+		return "", "", "", "", ""
+	}
+	if provider, modelEntry, err := m.resolveCurrentTabModelSelection(tab); err == nil {
+		return provider.Name, modelEntry.Model, modelEntry.APIFormat, m.activeRole, tab.history.SystemPrompt()
+	}
+	return "", "", "", m.activeRole, tab.history.SystemPrompt()
+}
+
+func (m Model) parametersForModelEntry(model config.ModelEntry) (float64, int, string, int) {
+	return model.Temperature, model.MaxTokens, model.ReasoningEffort, model.BudgetTokens
+}
+
+func validateGenerationModelEntry(model config.ModelEntry) error {
+	if strings.TrimSpace(model.Model) == "" {
+		return fmt.Errorf("model id is empty")
+	}
+	if strings.TrimSpace(model.APIFormat) == "" {
+		return fmt.Errorf("api_format is empty")
+	}
+	if model.MaxTokens <= 0 {
+		return fmt.Errorf("max_tokens must be positive")
+	}
+	if model.Temperature < 0 || model.Temperature > 2 {
+		return fmt.Errorf("temperature must be between 0 and 2")
+	}
+	if model.BudgetTokens < 0 {
+		return fmt.Errorf("budget_tokens must be non-negative")
+	}
+	return nil
+}
+
+func (m Model) resolveCurrentTabModelSelection(tab *TabSession) (config.ProviderEntry, config.ModelEntry, error) {
+	if tab == nil {
+		return config.ProviderEntry{}, config.ModelEntry{}, fmt.Errorf("no active tab")
+	}
+	if tab.providerConfigName == "" {
+		return config.ProviderEntry{}, config.ModelEntry{}, fmt.Errorf("current session provider is not selected")
+	}
+	provider, ok := m.lookupProviderConfig(tab.providerConfigName)
+	if !ok {
+		return config.ProviderEntry{}, config.ModelEntry{}, fmt.Errorf("current session provider %q not found", tab.providerConfigName)
+	}
+	if tab.modelConfigName == "" {
+		return config.ProviderEntry{}, config.ModelEntry{}, fmt.Errorf("current session model is not selected")
+	}
+	model, ok := lookupModelEntry(provider, tab.modelConfigName)
+	if !ok {
+		return config.ProviderEntry{}, config.ModelEntry{}, fmt.Errorf("current session model %q not found under provider %q", tab.modelConfigName, tab.providerConfigName)
+	}
+	if err := validateGenerationModelEntry(model); err != nil {
+		return config.ProviderEntry{}, config.ModelEntry{}, fmt.Errorf("current session model %q is invalid: %w", tab.modelConfigName, err)
+	}
+	return provider, model, nil
+}
+
+func (m Model) currentTabModelSelection(tab *TabSession) (config.ProviderEntry, config.ModelEntry, bool) {
+	provider, model, err := m.resolveCurrentTabModelSelection(tab)
+	return provider, model, err == nil
+}
+
+func (m Model) generationParametersForTab(tab *TabSession) (float64, int, string, int) {
+	if _, model, err := m.resolveCurrentTabModelSelection(tab); err == nil {
+		return m.parametersForModelEntry(model)
+	}
+	return 0, 0, "", 0
 }
 
 func markdownWrapWidth(termWidth int) int {

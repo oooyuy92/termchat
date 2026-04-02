@@ -177,6 +177,11 @@ func (m Model) updateResumeMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.activeTabSession().history.ReplaceMessages(msgs)
 		m.activeTabSession().history.SetSystemPrompt("")
 		m.activeRole = ""
+		if err := m.restoreConversationBindingToActiveTab(convName); err != nil {
+			m.statusMsg = "Restore model failed: " + err.Error()
+			m.mode = modeChat
+			return m, nil
+		}
 		m.activeTabSession().viewport.SetContent(m.buildChatContent())
 		m.activeTabSession().viewport.GotoBottom()
 		m.activeTabSession().chatFollowBottom = true

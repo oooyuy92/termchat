@@ -28,13 +28,18 @@ var geminiDebugLogger = func() *log.Logger {
 
 // GeminiClient implements Provider for the Google Gemini API using the official SDK.
 type GeminiClient struct {
-	apiKey string
-	model  string
-	client *genai.Client
+	apiKey  string
+	baseURL string
+	model   string
+	client  *genai.Client
 }
 
 func NewGeminiClient(baseURL, apiKey, model string) *GeminiClient {
-	g := &GeminiClient{apiKey: apiKey, model: canonicalGeminiModel(model)}
+	g := &GeminiClient{
+		apiKey:  apiKey,
+		baseURL: strings.TrimRight(baseURL, "/"),
+		model:   strings.TrimSpace(model),
+	}
 	g.initClient()
 	return g
 }
@@ -45,18 +50,27 @@ func (c *GeminiClient) initClient() {
 		APIKey:     c.apiKey,
 		Backend:    genai.BackendGeminiAPI,
 		HTTPClient: newHTTPClient(),
+		HTTPOptions: genai.HTTPOptions{
+			BaseURL: c.baseURL,
+		},
 	})
 	c.client = client
 }
 
-func (c *GeminiClient) Model() string        { return c.model }
-func (c *GeminiClient) SetModel(m string)    { c.model = canonicalGeminiModel(m) }
-func (c *GeminiClient) BaseURL() string      { return "https://generativelanguage.googleapis.com" }
+func (c *GeminiClient) Model() string     { return c.model }
+func (c *GeminiClient) SetModel(m string) { c.model = strings.TrimSpace(m) }
+func (c *GeminiClient) BaseURL() string {
+	if c.baseURL != "" {
+		return c.baseURL
+	}
+	return "https://generativelanguage.googleapis.com"
+}
 func (c *GeminiClient) APIKey() string       { return c.apiKey }
 func (c *GeminiClient) SupportsVision() bool { return true }
 
-func (c *GeminiClient) SetBaseURL(_ string) {
-	// The official SDK manages the endpoint internally.
+func (c *GeminiClient) SetBaseURL(baseURL string) {
+	c.baseURL = strings.TrimRight(baseURL, "/")
+	c.initClient()
 }
 
 func (c *GeminiClient) SetAPIKey(k string) {
@@ -72,7 +86,7 @@ func (c *GeminiClient) SendStreamChan(ctx context.Context, messages []Message, t
 		defer close(chunks)
 
 		if err := c.stream(ctx, messages, temp, maxTokens, reasoningEffort, budgetTokens, chunks); err != nil {
-			errs <- err
+			errs <- annotateGeminiError(err)
 		}
 	}()
 
@@ -138,6 +152,23 @@ func (c *GeminiClient) stream(ctx context.Context, messages []Message, temp floa
 	return nil
 }
 
+func annotateGeminiError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	msg := err.Error()
+	if strings.Contains(msg, "openai_error") || strings.Contains(msg, "bad_response_status_code") {
+		return fmt.Errorf(
+			"%s\nHint: the current `gemini` provider uses the Gemini native API (`/v1beta/models/...:streamGenerateContent`). "+
+				"Your configured base URL returned an OpenAI-style error response. If this endpoint is an OpenAI-compatible gateway, set `api.provider` to \"openai-compatible\" instead of \"gemini\".",
+			msg,
+		)
+	}
+
+	return err
+}
+
 func (c *GeminiClient) buildContents(messages []Message) ([]*genai.Content, *genai.Content) {
 	var contents []*genai.Content
 	var systemInstruction *genai.Content
@@ -189,7 +220,7 @@ func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens 
 		if level != "" {
 			tl := genai.ThinkingLevel(level)
 			return &genai.ThinkingConfig{
-				ThinkingLevel:  tl,
+				ThinkingLevel:   tl,
 				IncludeThoughts: true,
 			}
 		}
@@ -213,7 +244,7 @@ func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens 
 	if budgetTokens > 0 {
 		b := int32(budgetTokens)
 		return &genai.ThinkingConfig{
-			ThinkingBudget: &b,
+			ThinkingBudget:  &b,
 			IncludeThoughts: true,
 		}
 	}
@@ -223,17 +254,6 @@ func (c *GeminiClient) buildThinkingConfig(reasoningEffort string, budgetTokens 
 		return &genai.ThinkingConfig{IncludeThoughts: true}
 	}
 	return nil
-}
-
-func canonicalGeminiModel(model string) string {
-	trimmed := strings.TrimSpace(model)
-	switch strings.ToLower(trimmed) {
-	case "gemini-3.1-pro-preview":
-		// Marketing name is "Gemini 3.1 Pro Preview", but API model code is gemini-3-pro-preview.
-		return "gemini-3-pro-preview"
-	default:
-		return trimmed
-	}
 }
 
 func truncate(s string, n int) string {

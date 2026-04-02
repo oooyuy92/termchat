@@ -25,7 +25,7 @@ func (s *statusStubProvider) BaseURL() string       { return "" }
 func (s *statusStubProvider) APIKey() string        { return "" }
 func (s *statusStubProvider) SupportsVision() bool  { return false }
 
-func TestRenderStatusBarDoesNotWrapToSecondLine(t *testing.T) {
+func TestRenderStatusBarWrapsToSecondLineWhenNarrow(t *testing.T) {
 	tab := TabSession{
 		history: chat.NewHistory(),
 		client:  &statusStubProvider{model: "gemini-3-pro-preview-very-long"},
@@ -39,10 +39,32 @@ func TestRenderStatusBarDoesNotWrapToSecondLine(t *testing.T) {
 	}
 
 	bar := m.renderStatusBar()
-	if strings.Count(bar, "\n") != 0 {
-		t.Fatalf("status bar unexpectedly wrapped: %q", bar)
+	lines := strings.Split(xansi.Strip(bar), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("status bar line count = %d, want 2: %q", len(lines), bar)
 	}
-	if got := xansi.StringWidth(bar); got > m.width {
-		t.Fatalf("status bar width %d exceeds terminal width %d", got, m.width)
+	for _, line := range lines {
+		if got := xansi.StringWidth(line); got > m.width {
+			t.Fatalf("status bar line width %d exceeds terminal width %d: %q", got, m.width, line)
+		}
+	}
+}
+
+func TestRenderStatusBarStaysSingleLineWhenWideEnough(t *testing.T) {
+	tab := TabSession{
+		history: chat.NewHistory(),
+		client:  &statusStubProvider{model: "gemini-3-pro-preview"},
+	}
+	m := Model{
+		theme:     DarkTheme,
+		width:     120,
+		tabs:      []TabSession{tab},
+		activeTab: 0,
+		statusMsg: "Ready",
+	}
+
+	bar := m.renderStatusBar()
+	if strings.Count(xansi.Strip(bar), "\n") != 0 {
+		t.Fatalf("status bar unexpectedly wrapped: %q", bar)
 	}
 }

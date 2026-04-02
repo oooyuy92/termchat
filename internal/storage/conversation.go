@@ -4,6 +4,7 @@ package storage
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -32,6 +33,16 @@ type ConvSearchItem struct {
 
 type Store struct {
 	db *sql.DB
+}
+
+func validateMessageSnapshot(msg chat.Message) error {
+	if msg.Role != "assistant" {
+		return nil
+	}
+	if msg.SnapshotProvider == "" || msg.SnapshotModel == "" || msg.SnapshotAPIFormat == "" {
+		return fmt.Errorf("assistant messages require generation snapshot")
+	}
+	return nil
 }
 
 // New opens (or creates) the SQLite database at dir/termchat.db.
@@ -68,10 +79,15 @@ func migrate(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS conversations (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			name       TEXT NOT NULL UNIQUE,
+			provider_name TEXT NOT NULL DEFAULT '',
+			model_name TEXT NOT NULL DEFAULT '',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
 	if err != nil {
+		return err
+	}
+	if err := ensureConversationsColumns(tx); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`
@@ -91,6 +107,7 @@ func migrate(db *sql.DB) error {
 			deleted_batch_id          INTEGER NOT NULL DEFAULT 0,
 			snapshot_provider         TEXT NOT NULL DEFAULT '',
 			snapshot_model            TEXT NOT NULL DEFAULT '',
+			snapshot_api_format       TEXT NOT NULL DEFAULT '',
 			snapshot_role_name        TEXT NOT NULL DEFAULT '',
 			snapshot_role_prompt      TEXT NOT NULL DEFAULT ''
 		)
@@ -102,6 +119,56 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func ensureConversationsColumns(tx *sql.Tx) error {
+	rows, err := tx.Query(`PRAGMA table_info(conversations)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	alterStmts := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "provider_name",
+			sql:  `ALTER TABLE conversations ADD COLUMN provider_name TEXT NOT NULL DEFAULT ''`,
+		},
+		{
+			name: "model_name",
+			sql:  `ALTER TABLE conversations ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`,
+		},
+	}
+
+	for _, stmt := range alterStmts {
+		if existing[stmt.name] {
+			continue
+		}
+		if _, err := tx.Exec(stmt.sql); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func ensureMessagesColumns(tx *sql.Tx) error {
@@ -169,6 +236,10 @@ func ensureMessagesColumns(tx *sql.Tx) error {
 			sql:  `ALTER TABLE messages ADD COLUMN snapshot_model TEXT NOT NULL DEFAULT ''`,
 		},
 		{
+			name: "snapshot_api_format",
+			sql:  `ALTER TABLE messages ADD COLUMN snapshot_api_format TEXT NOT NULL DEFAULT ''`,
+		},
+		{
 			name: "snapshot_role_name",
 			sql:  `ALTER TABLE messages ADD COLUMN snapshot_role_name TEXT NOT NULL DEFAULT ''`,
 		},
@@ -220,10 +291,13 @@ func (s *Store) Save(name string, messages []chat.Message) error {
 
 	// Insert new messages.
 	for i, msg := range messages {
+		if err := validateMessageSnapshot(msg); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(
-			`INSERT INTO messages(conversation_id, role, content, seq, snapshot_provider, snapshot_model, snapshot_role_name, snapshot_role_prompt)
-			 VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-			convID, msg.Role, msg.Content, i, msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
+			`INSERT INTO messages(conversation_id, role, content, seq, snapshot_provider, snapshot_model, snapshot_api_format, snapshot_role_name, snapshot_role_prompt)
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			convID, msg.Role, msg.Content, i, msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotAPIFormat, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
 		); err != nil {
 			return err
 		}
@@ -321,6 +395,9 @@ func (s *Store) Close() error {
 
 // AppendMessage inserts a new message into the conversation and returns its ID.
 func (s *Store) AppendMessage(name string, msg chat.Message) (int64, error) {
+	if err := validateMessageSnapshot(msg); err != nil {
+		return 0, err
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -345,10 +422,10 @@ func (s *Store) AppendMessage(name string, msg chat.Message) (int64, error) {
 		`INSERT INTO messages(
 			conversation_id, role, content, seq, version_number, is_active_version,
 			edited_after_generation, stale_after_user_edit,
-			snapshot_provider, snapshot_model, snapshot_role_name, snapshot_role_prompt
-		) VALUES(?, ?, ?, ?, ?, 1, 0, 0, ?, ?, ?, ?)`,
+			snapshot_provider, snapshot_model, snapshot_api_format, snapshot_role_name, snapshot_role_prompt
+		) VALUES(?, ?, ?, ?, ?, 1, 0, 0, ?, ?, ?, ?, ?)`,
 		convID, msg.Role, msg.Content, msg.Seq, msg.VersionNumber,
-		msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
+		msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotAPIFormat, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
 	)
 	if err != nil {
 		return 0, err
@@ -377,6 +454,9 @@ func (s *Store) InitVersionGroup(messageID int64) error {
 
 // AppendAssistantVersion adds a new version to an existing version group.
 func (s *Store) AppendAssistantVersion(name string, anchorID int64, msg chat.Message) (int64, error) {
+	if err := validateMessageSnapshot(msg); err != nil {
+		return 0, err
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -397,10 +477,10 @@ func (s *Store) AppendAssistantVersion(name string, anchorID int64, msg chat.Mes
 		`INSERT INTO messages(
 			conversation_id, role, content, seq, version_group_id, version_number,
 			is_active_version, edited_after_generation, stale_after_user_edit,
-			snapshot_provider, snapshot_model, snapshot_role_name, snapshot_role_prompt
-		) VALUES(?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)`,
+			snapshot_provider, snapshot_model, snapshot_api_format, snapshot_role_name, snapshot_role_prompt
+		) VALUES(?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)`,
 		convID, msg.Role, msg.Content, msg.Seq, versionGroupID, msg.VersionNumber,
-		msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
+		msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotAPIFormat, msg.SnapshotRoleName, msg.SnapshotRolePrompt,
 	)
 	if err != nil {
 		return 0, err
@@ -453,6 +533,7 @@ func (s *Store) LoadActiveTimeline(name string) ([]chat.Message, error) {
 			m.deleted_batch_id,
 			m.snapshot_provider,
 			m.snapshot_model,
+			m.snapshot_api_format,
 			m.snapshot_role_name,
 			m.snapshot_role_prompt
 		FROM messages m
@@ -484,6 +565,7 @@ func (s *Store) LoadActiveTimeline(name string) ([]chat.Message, error) {
 			&msg.DeletedBatchID,
 			&msg.SnapshotProvider,
 			&msg.SnapshotModel,
+			&msg.SnapshotAPIFormat,
 			&msg.SnapshotRoleName,
 			&msg.SnapshotRolePrompt,
 		); err != nil {
@@ -509,7 +591,7 @@ func (s *Store) ListVersions(name string, anchorID int64) ([]chat.Message, error
 	}
 
 	rows, err := s.db.Query(`
-		SELECT id, role, content, seq, version_group_id, version_number, is_active_version, edited_after_generation, stale_after_user_edit, is_deleted, deleted_batch_id, snapshot_provider, snapshot_model, snapshot_role_name, snapshot_role_prompt
+		SELECT id, role, content, seq, version_group_id, version_number, is_active_version, edited_after_generation, stale_after_user_edit, is_deleted, deleted_batch_id, snapshot_provider, snapshot_model, snapshot_api_format, snapshot_role_name, snapshot_role_prompt
 		FROM messages
 		WHERE version_group_id = ? AND is_deleted = 0
 		ORDER BY version_number
@@ -538,6 +620,7 @@ func (s *Store) ListVersions(name string, anchorID int64) ([]chat.Message, error
 			&msg.DeletedBatchID,
 			&msg.SnapshotProvider,
 			&msg.SnapshotModel,
+			&msg.SnapshotAPIFormat,
 			&msg.SnapshotRoleName,
 			&msg.SnapshotRolePrompt,
 		); err != nil {
@@ -580,6 +663,7 @@ func (s *Store) LoadBrowseMessages(name string) ([]chat.Message, error) {
 			deleted_batch_id,
 			snapshot_provider,
 			snapshot_model,
+			snapshot_api_format,
 			snapshot_role_name,
 			snapshot_role_prompt
 		FROM messages
@@ -610,6 +694,7 @@ func (s *Store) LoadBrowseMessages(name string) ([]chat.Message, error) {
 			&msg.DeletedBatchID,
 			&msg.SnapshotProvider,
 			&msg.SnapshotModel,
+			&msg.SnapshotAPIFormat,
 			&msg.SnapshotRoleName,
 			&msg.SnapshotRolePrompt,
 		); err != nil {
@@ -876,6 +961,92 @@ func (s *Store) UpdateMessageContent(messageID int64, content string) error {
 	_, err := s.db.Exec(
 		`UPDATE messages SET content = ? WHERE id = ?`,
 		content, messageID,
+	)
+	return err
+}
+
+// UpdateAssistantMessage updates assistant content together with the
+// generation snapshot that produced it.
+func (s *Store) UpdateAssistantMessage(messageID int64, msg chat.Message) error {
+	if msg.Role == "" {
+		msg.Role = "assistant"
+	}
+	if err := validateMessageSnapshot(msg); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(
+		`UPDATE messages
+		 SET content = ?, snapshot_provider = ?, snapshot_model = ?, snapshot_api_format = ?, snapshot_role_name = ?, snapshot_role_prompt = ?
+		 WHERE id = ?`,
+		msg.Content, msg.SnapshotProvider, msg.SnapshotModel, msg.SnapshotAPIFormat, msg.SnapshotRoleName, msg.SnapshotRolePrompt, messageID,
+	)
+	return err
+}
+
+func (s *Store) SetConversationModelBinding(name, providerName, modelName string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO conversations(name, provider_name, model_name, updated_at)
+		 VALUES(?, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(name) DO UPDATE SET
+		 provider_name = excluded.provider_name,
+		 model_name = excluded.model_name,
+		 updated_at = CURRENT_TIMESTAMP`,
+		name, providerName, modelName,
+	)
+	return err
+}
+
+func (s *Store) GetConversationModelBinding(name string) (string, string, error) {
+	var providerName string
+	var modelName string
+	err := s.db.QueryRow(
+		`SELECT provider_name, model_name FROM conversations WHERE name = ?`,
+		name,
+	).Scan(&providerName, &modelName)
+	if err == sql.ErrNoRows {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return providerName, modelName, nil
+}
+
+func (s *Store) RenameConversationProviderBindings(oldName, newName string) error {
+	if oldName == "" || newName == "" || oldName == newName {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`UPDATE conversations
+		 SET provider_name = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE provider_name = ?`,
+		newName, oldName,
+	)
+	return err
+}
+
+func (s *Store) RenameConversationModelBindings(providerName, oldName, newName string) error {
+	if providerName == "" || oldName == "" || newName == "" || oldName == newName {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`UPDATE conversations
+		 SET model_name = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE provider_name = ? AND model_name = ?`,
+		newName, providerName, oldName,
+	)
+	return err
+}
+
+func (s *Store) RenameSnapshotProvider(oldName, newName string) error {
+	if oldName == "" || newName == "" || oldName == newName {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`UPDATE messages
+		 SET snapshot_provider = ?
+		 WHERE snapshot_provider = ?`,
+		newName, oldName,
 	)
 	return err
 }

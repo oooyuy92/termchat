@@ -27,7 +27,7 @@ var slashCmds = []slashCmd{
 	{"/history", "Conversation history"},
 	{"/model", "Manage and switch models"},
 	{"/roles", "Edit role presets"},
-	{"/settings", "Model & parameters"},
+	{"/settings", "App settings"},
 	{"/shortcuts", "Edit keyboard shortcuts"},
 }
 

@@ -6,22 +6,21 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/termchat/termchat/internal/chat"
 )
 
-// updateOnboardMode handles key events in onboarding mode.
-// It delegates field editing to updateConfigMode, but intercepts non-editing
-// Esc to save the current config (even defaults) and enter chat.
 func (m Model) updateOnboardMode(msg tea.KeyMsg) (Model, tea.Cmd) {
-	// Non-editing Esc: save whatever we have and enter chat.
-	if msg.String() == "esc" && !m.configEd.editing {
+	if msg.String() == "esc" || msg.String() == "s" {
 		m.mode = modeChat
-		m.statusMsg = "Ready! Type a message to start chatting."
-		m.activeTabSession().client = chat.NewProvider(m.cfg.API.Provider, m.cfg.API.BaseURL, m.cfg.API.APIKey, m.cfg.API.Model)
-		return m, m.saveConfigCmd()
+		m.statusMsg = "Skipped setup. Use /model to configure provider and model."
+		return m, nil
+	}
+	if msg.String() == "enter" {
+		m.modelSel = newModelSelectorState(m.modelRegistry, modelSelectorManage)
+		m.mode = modeModelSelector
+		m.statusMsg = "Configure a provider and model"
+		return m, nil
 	}
 
-	// Ctrl+C: double-quit pattern (same as other modes).
 	if msg.String() != "ctrl+c" {
 		m.confirmQuit = false
 	}
@@ -33,71 +32,24 @@ func (m Model) updateOnboardMode(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.statusMsg = "Press Ctrl+C again to quit"
 		return m, nil
 	}
-
-	// Delegate all other keys to the config editor logic.
-	// updateConfigMode's own "esc" handler (non-editing) sets m.mode = modeChat,
-	// but we've already handled that case above. In editing mode, esc cancels
-	// the edit — that's correct for onboarding too.
-	return m.updateConfigMode(msg)
+	return m, nil
 }
 
-// viewOnboard renders the first-run onboarding wizard.
 func (m Model) viewOnboard() string {
 	tabBar := (&m).renderTabBar()
 	var b strings.Builder
-	ed := m.configEd
 
 	b.WriteString(m.theme.ConfigTitleStyle().Render("Welcome to termchat!"))
 	b.WriteString("\n")
-	b.WriteString(m.theme.ConfigHelpStyle().Render("Configure your API access to get started."))
+	b.WriteString(m.theme.ConfigHelpStyle().Render("Set up your first provider and model to get started."))
 	b.WriteString("\n\n")
-
-	for i, field := range ed.fields {
-		cursor := "  "
-		if i == ed.cursor {
-			cursor = m.theme.ConfigCursorStyle().Render("> ")
-		}
-
-		label := m.theme.ConfigLabelStyle().Render(field.Label + ":")
-
-		var value string
-		if ed.editing && i == ed.cursor {
-			value = m.theme.ConfigEditStyle().Render(ed.editBuf + "\u2588")
-		} else {
-			displayVal := field.Value
-			if displayVal == "" {
-				displayVal = "(not set)"
-			} else if field.Masked {
-				displayVal = maskValue(displayVal)
-			}
-			value = m.theme.ConfigValueStyle().Render(displayVal)
-			if len(field.Options) > 0 {
-				optStrs := make([]string, len(field.Options))
-				for j, opt := range field.Options {
-					if opt == "" {
-						optStrs[j] = "(not set)"
-					} else {
-						optStrs[j] = opt
-					}
-				}
-				value += "  [" + strings.Join(optStrs, " | ") + "]"
-			}
-		}
-
-		b.WriteString(cursor + label + value + "\n")
-	}
-
+	b.WriteString(m.theme.ConfigLabelStyle().Render("Model Registry"))
 	b.WriteString("\n")
-
-	if ed.editErr != "" {
-		b.WriteString(m.theme.ConfigErrStyle().Render("  Error: "+ed.editErr) + "\n\n")
-	}
-
-	if ed.editing {
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: confirm  |  Esc: cancel"))
-	} else {
-		b.WriteString(m.theme.ConfigHelpStyle().Render("  ↑↓: navigate  |  Enter: edit/cycle  |  Esc: skip and start chatting"))
-	}
+	b.WriteString(m.theme.ConfigHelpStyle().Render("  termchat now manages providers and models through /model only."))
+	b.WriteString("\n")
+	b.WriteString(m.theme.ConfigHelpStyle().Render("  Add a provider, then add one or more models under it, then select the model to use in this chat."))
+	b.WriteString("\n")
+	b.WriteString(m.theme.ConfigHelpStyle().Render("  Enter: open model manager  |  S/Esc: skip for now  |  Ctrl+C: quit"))
 	b.WriteString("\n")
 
 	return lipgloss.JoinVertical(lipgloss.Left, tabBar, b.String()+"\n"+m.renderStatusBar())
